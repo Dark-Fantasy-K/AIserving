@@ -1,0 +1,17 @@
+# AI Serving Lab - 依赖
+# 安装: pip install -r requirements.txt
+
+# --- 核心 ---
+transformers>=4.35.0
+requests>=2.31.0
+psutil>=5.9.0
+
+# --- Ray Serve 方案 ---
+ray[serve]>=2.9.0
+
+# --- Flask 方案 ---
+# flask>=3.0.0
+# gunicorn>=21.2.0
+
+# --- PyTorch CPU 版（单独安装）---
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
