@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ============================================================
 # 配置
 # ============================================================
-BASE_URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
+BASE_URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:30800"
 PREDICT_URL = f"{BASE_URL}/predict"
 HEALTH_URL = f"{BASE_URL}/health"
 

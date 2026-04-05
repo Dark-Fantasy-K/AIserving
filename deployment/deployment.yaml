@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-serving
+  namespace: ai-serving
+  labels:
+    app: ai-serving
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-serving
+  template:
+    metadata:
+      labels:
+        app: ai-serving
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: ai-serving
+          image: ai-serving:latest
+          # k3s uses local images built with nerdctl/buildctl
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: TRANSFORMERS_CACHE
+              value: /app/model-cache
+            - name: HF_HOME
+              value: /app/model-cache
+            # OpenTelemetry: send traces to Jaeger in observability namespace
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger.observability.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: ai-serving
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+          volumeMounts:
+            - name: model-cache
+              mountPath: /app/model-cache
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1.5Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 3
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
+      # Allow scheduling on the single control-plane node
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule

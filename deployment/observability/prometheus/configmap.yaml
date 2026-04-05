@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: observability
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      # Scrape Prometheus itself
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # Scrape ai-serving pods via pod annotation discovery
+      # Pods need: prometheus.io/scrape: "true", prometheus.io/port: "8000", prometheus.io/path: "/metrics"
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: ['ai-serving']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+
+      # Direct scrape of ai-serving service (fallback)
+      - job_name: 'ai-serving'
+        static_configs:
+          - targets: ['ai-serving.ai-serving.svc.cluster.local:8000']
+        metrics_path: /metrics
+        scrape_interval: 10s
+
+      # Direct scrape of ai-serving-ray service
+      - job_name: 'ai-serving-ray'
+        static_configs:
+          - targets: ['ai-serving-ray.ai-serving.svc.cluster.local:8000']
+        metrics_path: /metrics
+        scrape_interval: 10s
+
+      # Scrape Jaeger metrics
+      - job_name: 'jaeger'
+        static_configs:
+          - targets: ['jaeger.observability.svc.cluster.local:14269']

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: observability
+  labels:
+    app: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+        - name: jaeger
+          image: jaegertracing/all-in-one:1.56
+          ports:
+            - containerPort: 16686  # Jaeger UI
+              name: ui
+            - containerPort: 4317   # OTLP gRPC
+              name: otlp-grpc
+            - containerPort: 4318   # OTLP HTTP
+              name: otlp-http
+            - containerPort: 14268  # Jaeger HTTP thrift
+              name: jaeger-http
+            - containerPort: 14269  # Prometheus metrics
+              name: metrics
+            - containerPort: 6831   # Jaeger UDP compact thrift (agent)
+              protocol: UDP
+              name: agent-compact
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+            - name: SPAN_STORAGE_TYPE
+              value: memory
+            - name: MEMORY_MAX_TRACES
+              value: "10000"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "300m"
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
