@@ -168,16 +168,20 @@ class SentimentServe:
 # 入口
 # ============================================================
 if __name__ == "__main__":
+    # Fix: metrics_export_port was removed from serve.start() in Ray 2.x;
+    #      must be set in ray.init() via _metrics_export_port.
     ray.init(
-        address="local",
         dashboard_host="0.0.0.0",
         dashboard_port=8265,
         ignore_reinit_error=True,
+        _metrics_export_port=9999,
     )
 
+    # serve.start() sets HTTP options (host/port); serve.run() deploys the app.
+    # Note: serve.run() internally reconnects and logs a harmless "HTTP config"
+    # warning — this is expected Ray 2.x behavior, not a functional issue.
     serve.start(
         http_options={"host": "0.0.0.0", "port": 8000},
-        metrics_export_port=9999,
     )
 
     serve.run(SentimentServe.bind(), name="ai-serving-ray", route_prefix="/")

@@ -25,7 +25,7 @@ EXPOSE 8265
 # Ray internal metrics (Prometheus)
 EXPOSE 9999
 
-ENV TRANSFORMERS_CACHE=/app/model-cache
+# Bug fix 3: TRANSFORMERS_CACHE deprecated in transformers v5, use HF_HOME only
 ENV HF_HOME=/app/model-cache
 # Disable Ray usage stats prompt
 ENV RAY_USAGE_STATS_ENABLED=0

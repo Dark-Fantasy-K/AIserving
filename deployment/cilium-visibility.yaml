@@ -1,0 +1,54 @@
+# Cilium L7 HTTP 可见性策略
+# 让 Hubble 能观测 ai-serving namespace 内的 HTTP 流量（包括 /predict 延迟）
+---
+# Flask 服务 L7 策略
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ai-serving-l7-visibility
+  namespace: ai-serving
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ai-serving
+  ingress:
+    - fromEndpoints:
+        - {}  # 允许所有来源（同 namespace 内 + NodePort）
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+          rules:
+            http:
+              - method: "POST"
+                path: "/predict"
+              - method: "GET"
+                path: "/health"
+              - method: "GET"
+                path: "/metrics"
+---
+# Ray Serve 服务 L7 策略
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ai-serving-ray-l7-visibility
+  namespace: ai-serving
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ai-serving-ray
+  ingress:
+    - fromEndpoints:
+        - {}
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+          rules:
+            http:
+              - method: "POST"
+                path: "/predict"
+              - method: "GET"
+                path: "/health"
+              - method: "GET"
+                path: "/metrics"

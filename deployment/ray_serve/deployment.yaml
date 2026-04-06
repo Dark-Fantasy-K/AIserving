@@ -23,7 +23,7 @@ spec:
       containers:
         - name: ai-serving-ray
           image: ai-serving-ray:latest
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
               name: http
@@ -34,8 +34,7 @@ spec:
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
-            - name: TRANSFORMERS_CACHE
-              value: /app/model-cache
+            # Bug fix 3: TRANSFORMERS_CACHE deprecated, removed
             - name: HF_HOME
               value: /app/model-cache
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -50,6 +49,9 @@ spec:
           volumeMounts:
             - name: model-cache
               mountPath: /app/model-cache
+            # Bug fix 4: Ray object store needs >30% RAM in /dev/shm (default 64MB is far too small)
+            - name: dshm
+              mountPath: /dev/shm
           resources:
             requests:
               memory: "1Gi"
@@ -75,6 +77,10 @@ spec:
         - name: model-cache
           persistentVolumeClaim:
             claimName: model-cache-pvc
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2500Mi
       tolerations:
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
