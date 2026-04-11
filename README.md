@@ -1,6 +1,10 @@
 # AI Serving Lab
 
-A lightweight AI inference service running on k3s (Kubernetes) on AWS EC2. Supports Flask and Ray Serve backends, HPA autoscaling, and uses **Cilium** as the default CNI with **Hubble** for real-time L7 HTTP inference latency observability.
+A multi-platform AI inference service running on Kubernetes. Supports Flask and Ray Serve backends, **KEDA** event-driven autoscaling, and uses **Cilium** as the CNI with **Hubble** for real-time L7 HTTP observability.
+
+Supports two deployment targets:
+- **k3s** — single-node, local or AWS EC2
+- **GKE** — Google Kubernetes Engine (multi-node, production-grade)
 
 > **Language / 语言**: [English](README.md) | [中文](README_CN.md)
 
@@ -9,30 +13,22 @@ A lightweight AI inference service running on k3s (Kubernetes) on AWS EC2. Suppo
 ## Architecture
 
 ```
-Client
-   │
-   ▼  NodePort :30800 (Flask) / :30801 (Ray)
-┌──────────────────────────────────────────────────┐
-│  AWS EC2                                         │
-│                                                  │
-│  k3s (Kubernetes)                                │
-│  ┌────────────────────────────────────────────┐  │
-│  │  CNI: Cilium  ←→  Hubble (L7 observability)│  │
-│  │                                            │  │
-│  │  Namespace: ai-serving                     │  │
-│  │  ┌─────────────────┐  ┌─────────────────┐  │  │
-│  │  │  Flask + Gunicorn│  │  Ray Serve      │  │  │
-│  │  │  :30800          │  │  :30801         │  │  │
-│  │  └─────────────────┘  └─────────────────┘  │  │
-│  │  PVC: model-cache (3Gi)                    │  │
-│  └────────────────────────────────────────────┘  │
-│                                                  │
-│  Namespace: kube-system                          │
-│  ┌────────────────────────────────────────────┐  │
-│  │  cilium-agent  hubble-relay  hubble-ui      │  │
-│  │  Hubble UI NodePort :30880                  │  │
-│  └────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────┘
+                        ┌─────────────────────────────────────────┐
+  port-forward only     │  Kubernetes Cluster (k3s or GKE)        │
+  (no public exposure)  │                                         │
+                        │  CNI: Cilium  ←→  Hubble (L7 observe)  │
+  localhost:18000 ──────┼──► ai-serving   (Flask + Gunicorn)      │
+  localhost:18001 ──────┼──► ai-serving-ray (Ray Serve)           │
+  localhost:8265  ──────┼──► Ray Dashboard                        │
+  localhost:8080  ──────┼──► Hubble UI                            │
+                        │                                         │
+                        │  KEDA ScaledObjects (CPU / Memory /     │
+                        │  Cron triggers) → HPA managed by KEDA   │
+                        │                                         │
+                        │  Storage:                               │
+                        │    k3s  → hostPath PV (3Gi)             │
+                        │    GKE  → GCE Persistent Disk PVC (10Gi)│
+                        └─────────────────────────────────────────┘
 ```
 
 ---
@@ -41,163 +37,173 @@ Client
 
 ```
 AIserving/
-├── deploy.sh                        # One-command deploy (Cilium + Hubble included)
+├── deploy.sh                          # One-command deploy (k3s or GKE)
+├── loadtest.py                        # Load test & KEDA scaling observation
 ├── deployment/
-│   ├── namespace.yaml               # ai-serving namespace
-│   ├── deployment.yaml              # Flask Deployment (replicas: 1)
-│   ├── service.yaml                 # Flask NodePort :30800
-│   ├── hpa.yaml                     # HPA (CPU 70% / Memory 80%)
-│   ├── pv-model-cache.yaml          # Model cache PersistentVolume (3Gi)
-│   ├── cilium-visibility.yaml       # Cilium L7 HTTP visibility policy
-│   ├── flask_ai/                    # Backend A: Flask + Gunicorn
+│   ├── namespace.yaml                 # ai-serving namespace
+│   ├── deployment.yaml                # Flask Deployment (k3s, imagePullPolicy: Never)
+│   ├── service.yaml                   # Flask ClusterIP :8000
+│   ├── hpa.yaml                       # Legacy HPA (replaced by KEDA)
+│   ├── pv-model-cache.yaml            # k3s hostPath PV (3Gi)
+│   ├── keda-scaledobjects.yaml        # KEDA ScaledObjects (Flask + Ray)
+│   ├── cilium-visibility.yaml         # Cilium L7 HTTP visibility policy
+│   ├── gke/                           # GKE-specific overlays
+│   │   ├── deployment.yaml            # Flask (imagePullPolicy: IfNotPresent,
+│   │   │                              #   strategy: Recreate, imagePullSecrets)
+│   │   └── pvc-model-cache.yaml       # GCE PD dynamic PVC (10Gi, standard-rwo)
+│   ├── flask_ai/
 │   │   ├── flask_app.py
 │   │   ├── Dockerfile
 │   │   └── requirements-k8s.txt
-│   └── ray_serve/                   # Backend B: Ray Serve
+│   └── ray_serve/
 │       ├── ray_app.py
 │       ├── Dockerfile
-│       ├── deployment.yaml          # Ray Deployment (with /dev/shm volume)
-│       ├── service.yaml             # Ray NodePort :30801
+│       ├── deployment.yaml
+│       ├── service.yaml
 │       └── requirements-k8s.txt
-├── load_test.py                     # Load test & autoscaling validation
-└── requirements.txt                 # Local dev dependencies
+└── requirements.txt
 ```
 
 ---
 
 ## Quick Start
 
-### One-command deploy
+### k3s (single-node / AWS EC2)
 
 ```bash
 git clone https://github.com/Dark-Fantasy-K/AIserving
 cd AIserving
 chmod +x deploy.sh
-./deploy.sh
+./deploy.sh --platform k3s
+```
+
+### GKE (Google Kubernetes Engine)
+
+```bash
+./deploy.sh \
+  --platform    gke \
+  --gke-project <GCP_PROJECT_ID> \
+  --gke-cluster <CLUSTER_NAME> \
+  --gke-region  <ZONE_OR_REGION>   # e.g. europe-west3-a
+```
+
+### deploy.sh Parameters
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--platform k3s\|gke` | Target platform | `k3s` |
+| `--gke-project` | GCP Project ID *(GKE required)* | — |
+| `--gke-cluster` | GKE cluster name *(GKE required)* | — |
+| `--gke-region` | GKE zone or region | `us-central1` |
+| `--registry` | Container registry URL | `gcr.io/<project>` |
+| `--cilium-version` | Cilium version | `v1.16.5` |
+| `--skip-build` | Skip image build & push | false |
+| `--skip-cilium` | Skip Cilium installation | false |
+
+```bash
+# Already have images pushed — only redeploy k8s resources
+./deploy.sh --platform gke \
+  --gke-project my-project --gke-cluster my-cluster \
+  --gke-region europe-west3-a \
+  --skip-build
 ```
 
 The script runs 8 steps automatically:
-1. Install k3s with `--flannel-backend=none --disable-network-policy`
-2. Install Docker
-3. Install Cilium CLI + Hubble CLI, deploy Cilium CNI + Hubble
-4. Build Flask and Ray Serve Docker images
-5. Import images into k3s containerd
-6. Apply all k8s manifests
-7. Apply Cilium L7 visibility policy + expose Hubble UI
-8. Verify services + confirm Hubble flow capture
 
-### Manual deploy
-
-#### 1. Install k3s (flannel must be disabled)
-
-```bash
-# ⚠️ These three flags are required for Cilium CNI to work
-curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
-  --flannel-backend=none \
-  --disable-network-policy \
-  --disable=traefik \
-  --write-kubeconfig-mode=644" sh -
-```
-
-#### 2. Install Cilium + Hubble
-
-```bash
-# Install cilium CLI
-CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
-curl -sL "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz" \
-  | sudo tar xz -C /usr/local/bin
-
-# Deploy Cilium with Hubble relay + UI + HTTP latency metrics
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-cilium install \
-  --version v1.16.5 \
-  --set k8sServiceHost=${NODE_IP} \
-  --set k8sServicePort=6443 \
-  --set hubble.relay.enabled=true \
-  --set hubble.ui.enabled=true \
-  --set hubble.metrics.enableOpenMetrics=true \
-  --set "hubble.metrics.enabled={dns,drop,tcp,flow,httpV2:exemplars=true;labelsContext=source_namespace\,destination_namespace\,destination_workload\,traffic_direction}"
-
-cilium status --wait
-```
-
-#### 3. Build images & import into k3s
-
-```bash
-# k3s uses its own containerd — Docker images must be imported manually
-sudo docker build -t ai-serving:latest deployment/flask_ai/
-sudo docker build -t ai-serving-ray:latest deployment/ray_serve/
-
-sudo docker save ai-serving:latest     | sudo k3s ctr images import -
-sudo docker save ai-serving-ray:latest | sudo k3s ctr images import -
-```
-
-#### 4. Deploy k8s resources
-
-```bash
-kubectl apply -f deployment/namespace.yaml
-kubectl apply -f deployment/pv-model-cache.yaml
-kubectl apply -f deployment/deployment.yaml
-kubectl apply -f deployment/service.yaml
-kubectl apply -f deployment/ray_serve/deployment.yaml
-kubectl apply -f deployment/ray_serve/service.yaml
-```
-
-#### 5. Enable Hubble L7 visibility
-
-```bash
-# Step A: apply L7 NetworkPolicy (declares which HTTP paths to proxy)
-kubectl apply -f deployment/cilium-visibility.yaml
-
-# Step B: annotate pods (forces traffic through Envoy proxy)
-# Both steps are required — missing either means Hubble sees only L4 (TCP)
-kubectl patch deployment ai-serving -n ai-serving --type=json -p='[
-  {"op":"add","path":"/spec/template/metadata/annotations/io.cilium.proxy-visibility",
-   "value":"<Ingress/8000/TCP/HTTP>"}
-]'
-kubectl patch deployment ai-serving-ray -n ai-serving --type=json -p='[
-  {"op":"add","path":"/spec/template/metadata/annotations/io.cilium.proxy-visibility",
-   "value":"<Ingress/8000/TCP/HTTP>"}
-]'
-
-# Expose Hubble UI as NodePort
-kubectl patch svc hubble-ui -n kube-system \
-  -p '{"spec":{"type":"NodePort","ports":[{"port":80,"targetPort":8081,"nodePort":30880}]}}'
-
-# Start Hubble relay port-forward (required for hubble CLI)
-kubectl port-forward -n kube-system svc/hubble-relay 4245:80 &
-```
+| Step | k3s | GKE |
+|------|-----|-----|
+| 1 | Install k3s (flannel disabled) | `gcloud container clusters get-credentials` |
+| 2 | Install Docker | Install Docker |
+| 3 | Install Cilium CLI + Hubble CLI, deploy Cilium | Same (no `k8sServiceHost`) |
+| 4 | Build images | Build + `docker push` to GCR |
+| 5 | Import into k3s containerd | Already pushed in Step 4 |
+| 6 | Apply manifests (hostPath PV) | Apply manifests (GCE PD PVC, Recreate strategy) |
+| 7 | Hubble L7 policy + NodePort expose | Hubble L7 policy + LoadBalancer → then ClusterIP |
+| 8 | Health check + verify | Health check via port-forward |
 
 ---
 
-## Service Ports
+## Storage
 
-| Service | NodePort | Purpose |
-|---------|----------|---------|
-| Flask /predict | **30800** | Flask + Gunicorn inference |
-| Ray /predict   | **30801** | Ray Serve inference |
-| Ray Dashboard  | **30265** | Ray cluster monitoring |
-| Hubble UI      | **30880** | Network flow visualization |
+### k3s — hostPath PersistentVolume
+
+```yaml
+# deployment/pv-model-cache.yaml
+storageClassName: manual
+hostPath:
+  path: /var/lib/ai-serving/model-cache
+capacity:
+  storage: 3Gi
+```
+
+### GKE — Dynamic GCE Persistent Disk
+
+```yaml
+# deployment/gke/pvc-model-cache.yaml
+storageClassName: standard-rwo   # GCE PD HDD (default)
+accessModes: [ReadWriteOnce]
+resources:
+  requests:
+    storage: 10Gi
+```
+
+GKE provisions the underlying Persistent Disk automatically — no manual PV needed.
+
+Available StorageClasses on GKE:
+
+| StorageClass | Type | Use case |
+|---|---|---|
+| `standard-rwo` *(default)* | GCE PD HDD | Model cache (large, low cost) |
+| `premium-rwo` | GCE PD SSD | High IOPS inference workloads |
+
+> **Note**: `ReadWriteOnce` PVCs can only attach to one node at a time.
+> The GKE Deployment uses `strategy: Recreate` to avoid `Multi-Attach` errors during rolling updates.
+
+---
+
+## Security — All Services ClusterIP
+
+All services are exposed as **ClusterIP only** (no public LoadBalancer or NodePort).
+Access everything through `kubectl port-forward`:
+
+```bash
+# AI inference APIs
+kubectl port-forward svc/ai-serving     18000:8000 -n ai-serving &
+kubectl port-forward svc/ai-serving-ray 18001:8000 -n ai-serving &
+
+# Ray Dashboard
+kubectl port-forward svc/ai-serving-ray 8265:8265 -n ai-serving &
+
+# Hubble UI
+kubectl port-forward svc/hubble-ui 8080:80 -n kube-system &
+```
+
+GKE-specific: GCR image pull requires an `imagePullSecret` (created by deploy.sh):
+
+```bash
+# Manually refresh if token expires
+kubectl create secret docker-registry gcr-pull-secret \
+  --docker-server=gcr.io \
+  --docker-username=oauth2accesstoken \
+  --docker-password="$(gcloud auth print-access-token)" \
+  --docker-email="$(gcloud config get-value account)" \
+  -n ai-serving --dry-run=client -o yaml | kubectl apply -f -
+```
 
 ---
 
 ## API Endpoints
 
+All examples below use port-forward addresses.
+
 ### `POST /predict`
 
 ```bash
-# Flask
-curl -X POST http://localhost:30800/predict \
-  -H "Content-Type: application/json" \
-  -d '{"text": "This movie was absolutely fantastic!"}'
-
-# Ray Serve
-curl -X POST http://localhost:30801/predict \
+curl -X POST http://localhost:18000/predict \
   -H "Content-Type: application/json" \
   -d '{"text": "This movie was absolutely fantastic!"}'
 ```
 
-Response:
 ```json
 {
   "text": "This movie was absolutely fantastic!",
@@ -210,7 +216,7 @@ Response:
 ### `GET /health`
 
 ```bash
-curl http://localhost:30800/health
+curl http://localhost:18000/health
 ```
 
 ```json
@@ -219,97 +225,114 @@ curl http://localhost:30800/health
 
 ---
 
-## Hubble Inference Latency Observation
+## Autoscaling — KEDA
 
-Hubble captures HTTP traffic at the **kernel network layer** via Cilium's Envoy proxy — no application changes required.
+KEDA replaces the legacy HPA with event-driven scaling. It manages its own HPA objects internally.
 
-### Live traffic
+### Flask (`ai-serving`)
+
+| Trigger | Threshold | Replicas |
+|---------|-----------|----------|
+| CPU utilization | > 60% | 1 → 5 |
+| Memory utilization | > 75% | 1 → 5 |
+| Scale-up window | 30s, max +2 pods/30s | |
+| Scale-down window | 180s, max -1 pod/120s | |
+
+### Ray Serve (`ai-serving-ray`)
+
+| Trigger | Threshold | Replicas |
+|---------|-----------|----------|
+| CPU utilization | > 60% | 1 → 3 |
+| Memory utilization | > 70% | 1 → 3 |
+| Cron (CST 22:00–08:00) | Night off-peak | lock at 1 |
+| Scale-up window | 60s, max +1 pod/60s | |
+| Scale-down window | 300s, max -1 pod/180s | |
 
 ```bash
-# Install hubble CLI (if not already installed)
-HUBBLE_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/hubble/master/stable.txt)
-curl -sL "https://github.com/cilium/hubble/releases/download/${HUBBLE_VERSION}/hubble-linux-amd64.tar.gz" \
-  | sudo tar xz -C /usr/local/bin
+# Check ScaledObject status
+kubectl get scaledobject -n ai-serving
 
-# Start relay port-forward
-kubectl port-forward -n kube-system svc/hubble-relay 4245:80 &
+# Watch KEDA-managed HPA
+kubectl get hpa -n ai-serving -w
 
-# Watch all HTTP flows in ai-serving namespace
-hubble observe --server localhost:4245 \
-  --namespace ai-serving \
-  --protocol http \
-  -f
+# Describe triggers
+kubectl describe scaledobject ai-serving-scaledobject -n ai-serving
 ```
+
+---
+
+## Load Testing
+
+`loadtest.py` runs concurrent requests against `/predict` and shows real-time scaling behavior.
+
+```bash
+# Default: Flask, 10 concurrency, 180s
+python3 loadtest.py
+
+# Ray Serve
+python3 loadtest.py --target ray
+
+# Both services simultaneously
+python3 loadtest.py --target both --concurrency 10 --duration 120
+
+# High load (attempt to reach maxReplicas)
+python3 loadtest.py --concurrency 15 --duration 300
+```
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--target flask\|ray\|both` | `flask` | Service to stress |
+| `--concurrency` | `10` | Threads; ≤15 recommended for CPU-only inference |
+| `--duration` | `180` | Test duration in seconds |
+| `--ramp` | `20` | Ramp-up time in seconds |
+| `--timeout` | `30` | Per-request timeout in seconds |
 
 Sample output:
 ```
-22:11:59  host → ai-serving/ai-serving-994c97549:8000  http-request  POST /predict
-22:11:59  host ← ai-serving/ai-serving-994c97549:8000  http-response 200  46ms
-22:11:59  host → ai-serving/ai-serving-ray-5568596c97:8000  http-request  POST /predict
-22:11:59  host ← ai-serving/ai-serving-ray-5568596c97:8000  http-response 200  53ms
+ 时间    RPS    P50ms   P95ms   P99ms      成功    错误  副本数
+──────────────────────────────────────────────────────────────
+  20s    6.0      450    1200    1800       120       0  flask=1/1→1
+  50s    8.2      480    1350    1900       520       0  flask=↑2/2→2
+  90s    9.1      510    1400    2000      1020       0  flask=↑3/3→3
 ```
 
-### Latency statistics
+> The script auto-starts `kubectl port-forward` and tears it down after the test.
+
+---
+
+## Hubble Observability
 
 ```bash
-# Generate test traffic
-for i in {1..20}; do
-  curl -s -X POST http://localhost:30800/predict \
-    -H "Content-Type: application/json" \
-    -d "{\"text\": \"test $i\"}" > /dev/null
-done
+# Start relay port-forward
+kubectl port-forward -n kube-system svc/hubble-relay 4245:80 &
 
-# Compute latency stats from Hubble flows
+# Live HTTP flows with latency
 hubble observe --server localhost:4245 \
-  --namespace ai-serving --protocol http \
-  --last 100 -o json \
-| python3 -c "
-import sys, json, statistics
-flask_ms, ray_ms = [], []
-for line in sys.stdin:
-    try:
-        flow = json.loads(line)['flow']
-        l7 = flow.get('l7', {})
-        if l7.get('type') != 'RESPONSE': continue
-        url = l7.get('http', {}).get('url', '')
-        if 'predict' not in url: continue
-        ms = int(l7.get('latency_ns', 0)) / 1e6
-        if ms == 0: continue
-        pod = flow.get('destination', {}).get('pod_name', '')
-        (ray_ms if 'ray' in pod else flask_ms).append(ms)
-    except: pass
-for name, data in [('Flask', flask_ms), ('Ray  ', ray_ms)]:
-    if data:
-        s = sorted(data)
-        print(f'{name}  n={len(data)}  min={min(data):.0f}ms  p50={statistics.median(data):.0f}ms  p95={s[int(len(s)*0.95)]:.0f}ms  max={max(data):.0f}ms')
-"
+  --namespace ai-serving --protocol http -f
+
+# Hubble UI
+kubectl port-forward svc/hubble-ui 8080:80 -n kube-system &
+# Open http://localhost:8080
 ```
-
-### Hubble UI
-
-Open `http://<EC2-IP>:30880` (open port 30880 in EC2 security group):
-- **Service Map** — visualize inter-service traffic topology
-- **Flows** — real-time HTTP request/response stream
-- Latency, status codes, and throughput per endpoint
 
 ---
 
 ## Serving Backends
 
-### Option A: Flask AI (`deployment/flask_ai/`)
+### Flask AI (`deployment/flask_ai/`)
 
 - Flask + Gunicorn (2 workers)
-- Prometheus metrics via `prometheus-flask-exporter` at `/metrics`
+- Prometheus metrics at `/metrics`
 - OpenTelemetry traces → Jaeger
-- Low memory footprint; suitable for t2.micro / t3.micro
+- Low memory footprint
 
-### Option B: Ray Serve (`deployment/ray_serve/`)
+### Ray Serve (`deployment/ray_serve/`)
 
-- Native Ray Serve autoscaling (queue-based, min=1 max=3)
+- Ray Serve with CPU request `200m` (reduced from 500m for small nodes)
 - Prometheus metrics on port 9999
 - OpenTelemetry traces → Jaeger
-- Ray Dashboard on NodePort 30265
-- **Requires** `/dev/shm` ≥ 2.5Gi — already configured with `emptyDir: medium: Memory` in `ray_serve/deployment.yaml`
+- Ray Dashboard accessible via port-forward `:8265`
+- Requires `/dev/shm` ≥ 2.5Gi — configured via `emptyDir: medium: Memory`
 
 ---
 
@@ -323,49 +346,28 @@ Open `http://<EC2-IP>:30880` (open port 30880 in EC2 security group):
 
 ---
 
-## Autoscaling (HPA)
-
-| Parameter | Value |
-|-----------|-------|
-| minReplicas | 1 |
-| maxReplicas | 3 |
-| CPU trigger | 70% avg utilization |
-| Memory trigger | 80% avg utilization |
-| Scale-up stabilization | 30s |
-| Scale-down stabilization | 120s |
-
-```bash
-kubectl apply -f deployment/hpa.yaml
-kubectl get hpa -n ai-serving -w
-```
-
----
-
-## Load Testing
-
-```bash
-python load_test.py http://localhost:30800
-```
-
-Stages: warm-up → moderate load → high load (triggers HPA) → cool-down → verify scale-down.
-
----
-
-## Cilium Configuration Notes
+## Cilium Notes
 
 ### Why k3s needs `--flannel-backend=none`
 
 k3s ships with flannel as the default CNI. Cilium must fully own the CNI layer to enable eBPF dataplane and Hubble L7 visibility. They cannot coexist.
 
-### L7 visibility requires two things
+### GKE Cilium installation
+
+On GKE, `k8sServiceHost` is not required. The cluster name is set explicitly to avoid Cilium's 32-character name limit (GKE context names like `gke_<project>_<zone>_<cluster>` are too long):
+
+```bash
+cilium install --version v1.16.5 \
+  --set cluster.name=<cluster-name>   # max 32 chars
+  --set hubble.relay.enabled=true \
+  ...
+```
+
+### L7 visibility requires two configurations
 
 | Configuration | Effect | Location |
-|---------------|--------|----------|
-| `CiliumNetworkPolicy` with L7 rules | Tells Cilium which HTTP paths to proxy | `cilium-visibility.yaml` |
-| Pod annotation `io.cilium.proxy-visibility` | Forces port traffic through Envoy proxy | `kubectl patch` |
+|---|---|---|
+| `CiliumNetworkPolicy` with L7 rules | Declares which HTTP paths to proxy | `cilium-visibility.yaml` |
+| Pod annotation `io.cilium.proxy-visibility` | Forces traffic through Envoy | `kubectl patch` |
 
-Missing either one means Hubble only sees L4 (TCP) flows — no HTTP method, path, or latency.
-
-### Ray Serve `/dev/shm` requirement
-
-Ray's object store needs ≥ 30% of available RAM as shared memory. EC2 default `/dev/shm` is only 64 MB. The `ray_serve/deployment.yaml` mounts `emptyDir: medium: Memory` at `/dev/shm` to fix this.
+Missing either one means Hubble only sees L4 (TCP) flows.

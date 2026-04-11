@@ -1,87 +1,79 @@
+# GKE 版 deployment — 与 k3s 版的差异：
+#   1. imagePullPolicy: IfNotPresent（从 GCR 拉取，非本地镜像）
+#   2. 去掉 control-plane toleration（GKE 无此节点角色）
+#   3. 镜像地址由 deploy.sh 的 sed 替换注入
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ai-serving-ray
+  name: ai-serving
   namespace: ai-serving
   labels:
-    app: ai-serving-ray
+    app: ai-serving
 spec:
-  # Ray Serve manages internal replicas; keep 1 k8s pod (head node)
   replicas: 1
+  # Recreate: 先删旧 Pod 再创建新 Pod
+  # RWO PVC 只能同时挂载到一个节点，RollingUpdate 会导致 Multi-Attach 错误
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app: ai-serving-ray
+      app: ai-serving
   template:
     metadata:
       labels:
-        app: ai-serving-ray
+        app: ai-serving
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
     spec:
       containers:
-        - name: ai-serving-ray
-          image: ai-serving-ray:latest
-          imagePullPolicy: IfNotPresent
+        - name: ai-serving
+          image: ai-serving:latest          # deploy.sh 会替换为 GCR 地址
+          imagePullPolicy: IfNotPresent     # GKE: 从 GCR 拉取
           ports:
             - containerPort: 8000
               name: http
-            - containerPort: 8265
-              name: dashboard
-            - containerPort: 9999
-              name: ray-metrics
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
-            # Bug fix 3: TRANSFORMERS_CACHE deprecated, removed
+            - name: TRANSFORMERS_CACHE
+              value: /app/model-cache
             - name: HF_HOME
               value: /app/model-cache
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://jaeger.observability.svc.cluster.local:4318
             - name: OTEL_SERVICE_NAME
-              value: ai-serving-ray
+              value: ai-serving
             - name: OTEL_TRACES_EXPORTER
               value: otlp
-            # Ray: disable object store spilling warnings on small nodes
-            - name: RAY_object_store_memory
-              value: "200000000"
           volumeMounts:
             - name: model-cache
               mountPath: /app/model-cache
-            # Bug fix 4: Ray object store needs >30% RAM in /dev/shm (default 64MB is far too small)
-            - name: dshm
-              mountPath: /dev/shm
           resources:
             requests:
-              memory: "1Gi"
-              cpu: "200m"   # 降低 request：GKE 节点 940m 可用，多 Pod 竞争时 500m 无法调度
+              memory: "512Mi"
+              cpu: "250m"
             limits:
-              memory: "2Gi"
+              memory: "1.5Gi"
               cpu: "1000m"
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 90
+            initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 90
+            initialDelaySeconds: 60
             periodSeconds: 10
             failureThreshold: 3
+      imagePullSecrets:
+        - name: gcr-pull-secret          # 由 deploy.sh 提前创建
       volumes:
         - name: model-cache
           persistentVolumeClaim:
             claimName: model-cache-pvc
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 2500Mi
-      tolerations:
-        - key: node-role.kubernetes.io/control-plane
-          operator: Exists
-          effect: NoSchedule

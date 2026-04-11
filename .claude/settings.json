@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kubectl apply:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(kubectl delete:*)",
+      "Bash(python3 -c \"import locust\")",
+      "Bash(python3 -c \"import asyncio,aiohttp\")",
+      "Bash(python3 /home/kk951ee/AIserving/loadtest.py --help)",
+      "Bash(sudo sshd:*)",
+      "Bash(sudo systemctl:*)",
+      "Bash(sudo ufw:*)",
+      "Bash(sudo iptables:*)"
+    ]
+  }
+}

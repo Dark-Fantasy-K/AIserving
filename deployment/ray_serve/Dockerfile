@@ -7,14 +7,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install all Python dependencies in one layer:
+#   1. PyTorch CPU-only（先装，体积最大，优先缓存该层）
+#   2. 其余依赖
+# 合并为单层可避免 BuildKit 在中间层保留 ~700MB 的 torch 临时文件
 COPY requirements-k8s.txt .
-RUN pip install --no-cache-dir -r requirements-k8s.txt
-
-# Install PyTorch CPU-only
 RUN pip install --no-cache-dir \
-    torch==2.2.2 \
-    --index-url https://download.pytorch.org/whl/cpu
+        torch==2.2.2 \
+        --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r requirements-k8s.txt
 
 COPY ray_app.py .
 

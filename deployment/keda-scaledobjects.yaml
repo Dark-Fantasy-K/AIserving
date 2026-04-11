@@ -1,0 +1,104 @@
+# =============================================================
+#  KEDA ScaledObjects — AIserving
+#  触发器：
+#    Flask    : CPU 利用率 + Memory 利用率
+#    Ray Serve: CPU 利用率 + Memory 利用率 + Cron（夜间缩容）
+# =============================================================
+
+# ── Flask AI Serving ──────────────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ai-serving-scaledobject
+  namespace: ai-serving
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-serving
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  # 触发缩容前需稳定 120s，避免抖动
+  cooldownPeriod: 120
+  # 轮询间隔（秒）
+  pollingInterval: 15
+  # 缩容到 0 的等待时间（0 = 不缩到 0）
+  idleReplicaCount: 0
+  triggers:
+    # CPU 超过 60% 时扩容
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"
+    # Memory 超过 75% 时扩容
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: "75"
+  advanced:
+    # 扩容激进：每 30s 最多加 2 个 Pod
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        # 缩容保守：每 120s 最多减 1 个 Pod
+        scaleDown:
+          stabilizationWindowSeconds: 180
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+
+---
+# ── Ray Serve ─────────────────────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ai-serving-ray-scaledobject
+  namespace: ai-serving
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-serving-ray
+  minReplicaCount: 1
+  maxReplicaCount: 3      # Ray head node 数量不宜过多
+  cooldownPeriod: 180     # Ray 启动慢，缩容更保守
+  pollingInterval: 20
+  triggers:
+    # CPU 超过 60% 扩容
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"
+    # Memory 超过 70% 扩容（Ray 内存消耗大）
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: "70"
+    # Cron：夜间（UTC 22:00-06:00）保持最小副本，白天允许扩容
+    - type: cron
+      metadata:
+        timezone: Asia/Shanghai
+        start: "0 22 * * *"   # 22:00 CST 缩到 minReplicaCount
+        end:   "0 8  * * *"   # 08:00 CST 恢复正常
+        desiredReplicas: "1"
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 60
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 180

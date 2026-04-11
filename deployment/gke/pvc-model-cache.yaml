@@ -1,0 +1,26 @@
+# GKE 动态供应 PVC — 替代 k3s 的 hostPath PV
+# GKE 会自动创建一块 GCE Persistent Disk（标准 HDD）并绑定
+#
+# StorageClass 说明:
+#   standard-rwo  (默认) — GCE PD HDD，按需供应，适合模型缓存（大容量低成本）
+#   premium-rwo          — GCE PD SSD，IOPS 更高，适合高频读写
+#   dynamic-rwo          — 与 standard-rwo 类似，部分区域可用
+#
+# accessModes: ReadWriteOnce — 同时只能被一个节点挂载（PD 限制）
+# 如需多 Pod 共享读，改用 GCS FUSE CSI (ReadWriteMany)，见注释
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: ai-serving
+  annotations:
+    # 保留磁盘数据，Pod 删除后不自动清理
+    # 改为 Delete 可在 PVC 删除时自动销毁底层 PD
+    volume.beta.kubernetes.io/storage-provisioner: pd.csi.storage.gke.io
+spec:
+  storageClassName: standard-rwo   # 改为 premium-rwo 可升级为 SSD
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi               # 模型文件约 1-3GB，留足缓冲空间
