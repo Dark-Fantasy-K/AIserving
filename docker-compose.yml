@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  # ---- 行人姿态估计 ----
+  pedestrian:
+    build:
+      context: .
+      dockerfile: mnt/user-data/outputs/yolo-microservices/pedestrian-service/Dockerfile
+    container_name: pedestrian-svc
+    ports:
+      - "50052:50052"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ---- 车辆计数跟踪 ----
+  vehicle:
+    build:
+      context: .
+      dockerfile: mnt/user-data/outputs/yolo-microservices/vehicle-service/Dockerfile
+    container_name: vehicle-svc
+    ports:
+      - "50053:50053"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ---- Router (YOLO 检测 + 分发) ----
+  router:
+    build:
+      context: .
+      dockerfile: Dockerfile.router
+    container_name: router-svc
+    ports:
+      - "50051:50051"
+    environment:
+      PEDESTRIAN_SERVICE_ADDR: pedestrian:50052
+      VEHICLE_SERVICE_ADDR: vehicle:50053
+    depends_on:
+      - pedestrian
+      - vehicle
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ---- HTTP Gateway (对外入口) ----
+  gateway:
+    build:
+      context: .
+      dockerfile: mnt/user-data/outputs/yolo-microservices/gateway/Dockerfile
+    container_name: gateway-svc
+    ports:
+      - "5000:5000"
+    environment:
+      ROUTER_SERVICE_ADDR: router:50051
+    depends_on:
+      - router

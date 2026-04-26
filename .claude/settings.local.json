@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x /home/ubuntu/AIChain/setup.sh)",
+      "Bash(bash -n /home/ubuntu/AIChain/setup.sh)"
+    ]
+  }
+}

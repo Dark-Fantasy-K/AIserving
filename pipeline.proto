@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package yolopipeline;
+
+// ============================================================
+//  公共消息
+// ============================================================
+
+message BoundingBox {
+  float x1 = 1;
+  float y1 = 2;
+  float x2 = 3;
+  float y2 = 4;
+}
+
+message Detection {
+  string class_name = 1;
+  float  confidence = 2;
+  BoundingBox bbox  = 3;
+}
+
+// 图像帧 (RGB bytes)
+message Frame {
+  bytes  data   = 1;   // JPEG 编码的图像
+  int32  width  = 2;
+  int32  height = 3;
+  int32  frame_index = 4;
+}
+
+// ============================================================
+//  Pedestrian Service (行人姿态估计)
+// ============================================================
+
+message Keypoint {
+  string name       = 1;
+  float  x          = 2;
+  float  y          = 3;
+  float  confidence = 4;
+}
+
+message PersonPose {
+  BoundingBox        bbox       = 1;
+  float              confidence = 2;
+  repeated Keypoint  keypoints  = 3;
+}
+
+message PedestrianRequest {
+  Frame               frame      = 1;
+  repeated Detection  detections = 2;  // router 筛出的 person 检测
+}
+
+message PedestrianResponse {
+  int32               person_count    = 1;
+  repeated PersonPose persons         = 2;
+  bytes               annotated_frame = 3;  // 标注后的 JPEG
+  float               latency_ms      = 4;
+}
+
+service PedestrianService {
+  rpc ProcessFrame (PedestrianRequest) returns (PedestrianResponse);
+}
+
+// ============================================================
+//  Vehicle Service (车辆计数跟踪)
+// ============================================================
+
+message Vehicle {
+  string      class_name = 1;
+  float       confidence = 2;
+  BoundingBox bbox       = 3;
+  int32       track_id   = 4;
+}
+
+message VehicleCount {
+  string class_name = 1;
+  int32  count      = 2;
+}
+
+message VehicleRequest {
+  Frame               frame      = 1;
+  repeated Detection  detections = 2;  // router 筛出的车辆检测
+}
+
+message VehicleResponse {
+  int32                   current_total    = 1;
+  int32                   active_tracks    = 2;
+  repeated Vehicle        vehicles         = 3;
+  repeated VehicleCount   current_counts   = 4;
+  repeated VehicleCount   cumulative       = 5;
+  bytes                   annotated_frame  = 6;  // 标注后的 JPEG
+  float                   latency_ms       = 7;
+}
+
+service VehicleService {
+  rpc ProcessFrame (VehicleRequest) returns (VehicleResponse);
+}
+
+// ============================================================
+//  Router Service (YOLO 检测 + 分发)
+// ============================================================
+
+message RouterRequest {
+  Frame frame = 1;
+}
+
+message RouterResponse {
+  repeated Detection   all_detections     = 1;
+  PedestrianResponse   pedestrian_result  = 2;
+  VehicleResponse      vehicle_result     = 3;
+  repeated Detection   unhandled          = 4;
+  bytes                merged_frame       = 5;  // 合并标注后的 JPEG
+  float                total_latency_ms   = 6;
+}
+
+service RouterService {
+  rpc Detect (RouterRequest) returns (RouterResponse);
+}

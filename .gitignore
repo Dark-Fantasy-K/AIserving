@@ -1,0 +1,11 @@
+# gRPC generated code
+generated/
+proto_gen/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# model
+*.pt
