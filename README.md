@@ -32,25 +32,38 @@ A real-time object detection microservices system based on YOLOv8, using gRPC co
 ## Directory Structure
 
 ```
-AIChain/
-├── setup.sh                        # One-shot install script
-├── build.sh                        # Build/deploy script
+AIserving/
+├── server.py                       # Router service entry point
+├── Dockerfile.router               # Router Docker image
 ├── pipeline.proto                  # gRPC protocol definition
+├── proto_gen/                      # Generated gRPC stubs (router)
 ├── requirements.txt                # Global Python dependencies
-├── server.py                       # Router service main file
-├── generate.sh                     # proto generation (called by setup.sh)
+├── setup.sh                        # One-shot install: deps + proto stubs
+├── build.sh                        # Build / deploy script
+├── generate.sh                     # Standalone proto generation helper
 ├── docker-compose.yml              # Docker Compose configuration
 ├── all-in-one.yaml                 # Kubernetes manifests
+├── validate_video.py               # Video dataset validation script
+├── yolov8s.pt                      # YOLOv8s weights (router)
+├── datasets/                       # Sample video datasets
+│   └── person_vehicle.mp4
 └── services/
     ├── gateway/
     │   ├── server.py
-    │   └── requirements.txt
+    │   ├── requirements.txt
+    │   ├── Dockerfile
+    │   └── proto_gen/
     ├── pedestrian-service/
     │   ├── server.py
-    │   └── requirements.txt
+    │   ├── requirements.txt
+    │   ├── Dockerfile
+    │   ├── yolov8s-pose.pt
+    │   └── proto_gen/
     └── vehicle-service/
         ├── server.py
-        └── requirements.txt
+        ├── requirements.txt
+        ├── Dockerfile
+        └── proto_gen/
 ```
 
 ---
@@ -176,6 +189,70 @@ REGISTRY=your-registry ./build.sh k8s      # Deploy
 ```
 
 Access via NodePort: `http://<node-ip>:30500`
+
+---
+
+## Dataset & Validation
+
+### Download Traffic Video Dataset
+
+A sample traffic video containing pedestrians, cars, and bicycles is included for pipeline testing.
+
+```bash
+mkdir -p datasets
+wget "https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4" \
+     -O datasets/person_vehicle.mp4
+```
+
+| Property | Value |
+|----------|-------|
+| Source | Intel IoT DevKit open sample videos |
+| Resolution | 768 × 432 |
+| Frame rate | 12 fps |
+| Duration | ~54 s (647 frames) |
+| Content | Pedestrians, bicycles, cars in outdoor scenes |
+
+### Validation Script
+
+`validate_video.py` supports two modes:
+
+**Local mode** — runs YOLOv8 directly, no gRPC services required:
+
+```bash
+.venv/bin/python validate_video.py \
+    --video datasets/person_vehicle.mp4 \
+    --local \
+    --out datasets/person_vehicle_annotated.mp4
+```
+
+**gRPC mode** — sends every frame through the full Router → Pedestrian / Vehicle pipeline:
+
+```bash
+.venv/bin/python validate_video.py \
+    --video datasets/person_vehicle.mp4 \
+    --grpc \
+    --addr localhost:50051 \
+    --out datasets/person_vehicle_annotated.mp4
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--video` | `datasets/person_vehicle.mp4` | Input video path |
+| `--local` | — | Run YOLOv8 locally (no services needed) |
+| `--grpc` | — | Send frames to Router gRPC service |
+| `--addr` | `localhost:50051` | Router gRPC address |
+| `--max-frames` | 0 (all) | Limit number of frames to process |
+| `--out` | — | Save annotated output video |
+
+### Validation Results (YOLOv8s, CPU, 647 frames)
+
+| Metric | Value |
+|--------|-------|
+| Persons detected (cumulative) | 248 |
+| Vehicles detected (cumulative) | 85 |
+| Other detections (bicycle, etc.) | 174 |
+| Average inference latency | 76 ms / frame |
+| Min / Max latency | 72.7 / 177.7 ms |
 
 ---
 

@@ -13,7 +13,7 @@
 
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-SERVICES_DIR="$ROOT/mnt/user-data/outputs/yolo-microservices"
+SERVICES_DIR="$ROOT/services"
 
 REGISTRY="${REGISTRY:-your-registry}"
 TAG="${TAG:-latest}"

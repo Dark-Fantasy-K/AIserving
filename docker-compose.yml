@@ -5,7 +5,7 @@ services:
   pedestrian:
     build:
       context: .
-      dockerfile: mnt/user-data/outputs/yolo-microservices/pedestrian-service/Dockerfile
+      dockerfile: services/pedestrian-service/Dockerfile
     container_name: pedestrian-svc
     ports:
       - "50052:50052"
@@ -18,7 +18,7 @@ services:
   vehicle:
     build:
       context: .
-      dockerfile: mnt/user-data/outputs/yolo-microservices/vehicle-service/Dockerfile
+      dockerfile: services/vehicle-service/Dockerfile
     container_name: vehicle-svc
     ports:
       - "50053:50053"
@@ -50,7 +50,7 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: mnt/user-data/outputs/yolo-microservices/gateway/Dockerfile
+      dockerfile: services/gateway/Dockerfile
     container_name: gateway-svc
     ports:
       - "5000:5000"

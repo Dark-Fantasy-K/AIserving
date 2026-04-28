@@ -11,7 +11,7 @@
 
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-SERVICES_DIR="$ROOT/mnt/user-data/outputs/yolo-microservices"
+SERVICES_DIR="$ROOT/services"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}✓${NC} $*"; }

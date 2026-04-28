@@ -31,25 +31,38 @@
 ## 目录结构
 
 ```
-AIChain/
-├── setup.sh                        # 一键安装脚本
-├── build.sh                        # 构建/部署脚本
+AIserving/
+├── server.py                       # Router 服务入口
+├── Dockerfile.router               # Router Docker 镜像
 ├── pipeline.proto                  # gRPC 协议定义
+├── proto_gen/                      # 生成的 gRPC stubs（Router 用）
 ├── requirements.txt                # 全局 Python 依赖
-├── server.py                       # Router 服务主文件
-├── generate.sh                     # proto 生成（由 setup.sh 调用）
+├── setup.sh                        # 一键安装：依赖 + proto stubs
+├── build.sh                        # 构建 / 部署脚本
+├── generate.sh                     # 独立 proto 生成辅助脚本
 ├── docker-compose.yml              # Docker Compose 配置
 ├── all-in-one.yaml                 # Kubernetes 部署清单
-└── mnt/user-data/outputs/yolo-microservices/
+├── validate_video.py               # 视频数据集验证脚本
+├── yolov8s.pt                      # YOLOv8s 权重（Router）
+├── datasets/                       # 样本视频数据集
+│   └── person_vehicle.mp4
+└── services/
     ├── gateway/
     │   ├── server.py
-    │   └── requirements.txt
+    │   ├── requirements.txt
+    │   ├── Dockerfile
+    │   └── proto_gen/
     ├── pedestrian-service/
     │   ├── server.py
-    │   └── requirements.txt
+    │   ├── requirements.txt
+    │   ├── Dockerfile
+    │   ├── yolov8s-pose.pt
+    │   └── proto_gen/
     └── vehicle-service/
         ├── server.py
-        └── requirements.txt
+        ├── requirements.txt
+        ├── Dockerfile
+        └── proto_gen/
 ```
 
 ---
@@ -179,6 +192,70 @@ REGISTRY=your-registry ./build.sh k8s      # 部署
 ```
 
 访问：`http://<node-ip>:30500`
+
+---
+
+## 数据集与验证
+
+### 下载交通视频数据集
+
+项目内置一段包含行人、车辆和自行车的交通样本视频，用于 Pipeline 测试。
+
+```bash
+mkdir -p datasets
+wget "https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4" \
+     -O datasets/person_vehicle.mp4
+```
+
+| 属性 | 值 |
+|------|----|
+| 来源 | Intel IoT DevKit 公开样本视频 |
+| 分辨率 | 768 × 432 |
+| 帧率 | 12 fps |
+| 时长 | ~54 秒（647 帧） |
+| 内容 | 室外场景中的行人、自行车、机动车 |
+
+### 验证脚本
+
+`validate_video.py` 支持两种模式：
+
+**本地模式** — 直接调用 YOLOv8，无需启动任何 gRPC 服务：
+
+```bash
+.venv/bin/python validate_video.py \
+    --video datasets/person_vehicle.mp4 \
+    --local \
+    --out datasets/person_vehicle_annotated.mp4
+```
+
+**gRPC 模式** — 逐帧经过完整的 Router → Pedestrian / Vehicle Pipeline：
+
+```bash
+.venv/bin/python validate_video.py \
+    --video datasets/person_vehicle.mp4 \
+    --grpc \
+    --addr localhost:50051 \
+    --out datasets/person_vehicle_annotated.mp4
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--video` | `datasets/person_vehicle.mp4` | 输入视频路径 |
+| `--local` | — | 使用本地 YOLOv8（无需启动服务） |
+| `--grpc` | — | 发送帧到 Router gRPC 服务 |
+| `--addr` | `localhost:50051` | Router gRPC 地址 |
+| `--max-frames` | 0（全部） | 限制处理帧数 |
+| `--out` | — | 保存标注后的输出视频 |
+
+### 验证结果（YOLOv8s，CPU，647 帧）
+
+| 指标 | 数值 |
+|------|------|
+| 行人累计检测数 | 248 |
+| 车辆累计检测数 | 85 |
+| 其他目标（自行车等） | 174 |
+| 平均推理延迟 | 76 ms / 帧 |
+| 最小 / 最大延迟 | 72.7 / 177.7 ms |
 
 ---
 

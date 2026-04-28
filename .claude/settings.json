@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 list *)",
+      "Bash(python3 -c \"import grpc; import cv2; import numpy; print\\('grpc:', grpc.__version__\\); print\\('cv2:', cv2.__version__\\); print\\('numpy:', numpy.__version__\\)\")",
+      "Bash(/home/user/uservms/houy/AIserving/.venv/bin/python -c \"import grpc; import cv2; from ultralytics import YOLO; print\\('grpc OK'\\); print\\('cv2:', cv2.__version__\\)\")",
+      "Bash(/home/user/uservms/houy/AIserving/.venv/bin/python -c ' *)",
+      "Bash(wget -q --show-progress https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4 -O datasets/person_vehicle.mp4)"
+    ]
+  }
+}
