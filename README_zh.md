@@ -43,9 +43,11 @@ AIserving/
 ├── docker-compose.yml              # Docker Compose 配置
 ├── all-in-one.yaml                 # Kubernetes 部署清单
 ├── validate_video.py               # 视频数据集验证脚本
+├── make_burst_dataset.py           # 合成突发流量视频生成器
 ├── yolov8s.pt                      # YOLOv8s 权重（Router）
-├── datasets/                       # 样本视频数据集
-│   └── person_vehicle.mp4
+├── samples/                        # 样本视频数据集
+│   ├── person_vehicle.mp4          # 真实交通视频（行人 + 自行车 + 车辆）
+│   └── burst_traffic.mp4           # 合成突发流量：空白 → 人群涌入 → 持续拥挤
 └── services/
     ├── gateway/
     │   ├── server.py
@@ -195,16 +197,16 @@ REGISTRY=your-registry ./build.sh k8s      # 部署
 
 ---
 
-## 数据集与验证
+## 样本数据集与验证
 
-### 下载交通视频数据集
+`samples/` 目录下提供两段样本视频，用于 Pipeline 功能验证与压测。
 
-项目内置一段包含行人、车辆和自行车的交通样本视频，用于 Pipeline 测试。
+### `samples/person_vehicle.mp4` — 真实交通视频
 
 ```bash
-mkdir -p datasets
+mkdir -p samples
 wget "https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4" \
-     -O datasets/person_vehicle.mp4
+     -O samples/person_vehicle.mp4
 ```
 
 | 属性 | 值 |
@@ -215,6 +217,26 @@ wget "https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycl
 | 时长 | ~54 秒（647 帧） |
 | 内容 | 室外场景中的行人、自行车、机动车 |
 
+### `samples/burst_traffic.mp4` — 合成突发流量视频
+
+由 `make_burst_dataset.py` 生成，模拟突发人群涌入，用于 Pipeline 负载测试。
+
+```bash
+.venv/bin/python make_burst_dataset.py \
+    --source samples/person_vehicle.mp4 \
+    --out    samples/burst_traffic.mp4 \
+    --persons 15 --fps 12
+```
+
+| 属性 | 值 |
+|------|----|
+| 分辨率 | 768 × 432 |
+| 帧率 | 12 fps |
+| 时长 | 10 秒（120 帧） |
+| 0～2 s | 空白画面（0 人） |
+| 2～7 s | 人群涌入（1 → 15 人，线性增长） |
+| 7～10 s | 持续拥挤（约 15 人） |
+
 ### 验证脚本
 
 `validate_video.py` 支持两种模式：
@@ -222,32 +244,41 @@ wget "https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycl
 **本地模式** — 直接调用 YOLOv8，无需启动任何 gRPC 服务：
 
 ```bash
+# 真实交通视频
 .venv/bin/python validate_video.py \
-    --video datasets/person_vehicle.mp4 \
+    --video samples/person_vehicle.mp4 \
     --local \
-    --out datasets/person_vehicle_annotated.mp4
+    --out   samples/person_vehicle_annotated.mp4
+
+# 突发流量视频
+.venv/bin/python validate_video.py \
+    --video samples/burst_traffic.mp4 \
+    --local \
+    --out   samples/burst_traffic_annotated.mp4
 ```
 
 **gRPC 模式** — 逐帧经过完整的 Router → Pedestrian / Vehicle Pipeline：
 
 ```bash
 .venv/bin/python validate_video.py \
-    --video datasets/person_vehicle.mp4 \
+    --video samples/person_vehicle.mp4 \
     --grpc \
     --addr localhost:50051 \
-    --out datasets/person_vehicle_annotated.mp4
+    --out  samples/person_vehicle_annotated.mp4
 ```
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--video` | `datasets/person_vehicle.mp4` | 输入视频路径 |
+| `--video` | `samples/person_vehicle.mp4` | 输入视频路径 |
 | `--local` | — | 使用本地 YOLOv8（无需启动服务） |
 | `--grpc` | — | 发送帧到 Router gRPC 服务 |
 | `--addr` | `localhost:50051` | Router gRPC 地址 |
 | `--max-frames` | 0（全部） | 限制处理帧数 |
 | `--out` | — | 保存标注后的输出视频 |
 
-### 验证结果（YOLOv8s，CPU，647 帧）
+### 验证结果
+
+**`person_vehicle.mp4`**（YOLOv8s，CPU，647 帧）
 
 | 指标 | 数值 |
 |------|------|
@@ -256,6 +287,15 @@ wget "https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycl
 | 其他目标（自行车等） | 174 |
 | 平均推理延迟 | 76 ms / 帧 |
 | 最小 / 最大延迟 | 72.7 / 177.7 ms |
+
+**`burst_traffic.mp4`**（YOLOv8s，CPU，120 帧）
+
+| 指标 | 数值 |
+|------|------|
+| 行人累计检测数 | 541 |
+| 车辆累计检测数 | 1 |
+| 平均推理延迟 | 68.3 ms / 帧 |
+| 最小 / 最大延迟 | 65.7 / 172.5 ms |
 
 ---
 
