@@ -17,9 +17,14 @@ import numpy as np
 from PIL import Image
 
 from proto_gen import pipeline_pb2, pipeline_pb2_grpc
+from telemetry import setup, grpc_extract
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [VEH] %(message)s")
 logger = logging.getLogger(__name__)
+
+tracer, meter = setup("vehicle")
+_response_time   = meter.create_histogram("vehicle.response_time_ms",   unit="ms", description="Full ProcessFrame RPC duration")
+_processing_time = meter.create_histogram("vehicle.processing_time_ms", unit="ms", description="Tracking computation duration")
 
 CLASS_COLORS = {
     "car":        (251, 146, 60),
@@ -108,74 +113,85 @@ class VehicleServicer(pipeline_pb2_grpc.VehicleServiceServicer):
         logger.info("Vehicle tracker initialized")
 
     def ProcessFrame(self, request, context):
-        start = time.time()
-        frame = decode_frame(request.frame)
+        parent_ctx = grpc_extract(context)
+        t_start = time.time()
 
-        dets = []
-        for d in request.detections:
-            dets.append({
-                "class_name": d.class_name,
-                "confidence": d.confidence,
-                "bbox": [d.bbox.x1, d.bbox.y1, d.bbox.x2, d.bbox.y2],
-            })
+        with tracer.start_as_current_span("vehicle.process_frame", context=parent_ctx) as span:
+            frame = decode_frame(request.frame)
 
-        tracked = self.tracker.update(dets)
+            dets = []
+            for d in request.detections:
+                dets.append({
+                    "class_name": d.class_name,
+                    "confidence": d.confidence,
+                    "bbox": [d.bbox.x1, d.bbox.y1, d.bbox.x2, d.bbox.y2],
+                })
 
-        current_counts = defaultdict(int)
-        vehicles = []
-        for v in tracked:
-            current_counts[v["class_name"]] += 1
-            vehicles.append(pipeline_pb2.Vehicle(
-                class_name=v["class_name"],
-                confidence=v["confidence"],
-                bbox=pipeline_pb2.BoundingBox(
-                    x1=v["bbox"][0], y1=v["bbox"][1],
-                    x2=v["bbox"][2], y2=v["bbox"][3],
-                ),
-                track_id=v["track_id"],
-            ))
+            with tracer.start_as_current_span("vehicle.tracking") as proc_span:
+                t_proc = time.time()
+                tracked = self.tracker.update(dets)
+                proc_ms = round((time.time() - t_proc) * 1000, 1)
+                proc_span.set_attribute("processing_time_ms", proc_ms)
+                _processing_time.record(proc_ms)
 
-        annotated = frame.copy()
-        for v in tracked:
-            color = CLASS_COLORS.get(v["class_name"], DEFAULT_COLOR)
-            x1, y1, x2, y2 = [int(c) for c in v["bbox"]]
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            label = f'#{v["track_id"]} {v["class_name"]} {v["confidence"]:.0%}'
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 8, y1), COLOR_TEXT_BG, -1)
-            cv2.putText(annotated, label, (x1 + 4, y1 - 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+            current_counts = defaultdict(int)
+            vehicles = []
+            for v in tracked:
+                current_counts[v["class_name"]] += 1
+                vehicles.append(pipeline_pb2.Vehicle(
+                    class_name=v["class_name"],
+                    confidence=v["confidence"],
+                    bbox=pipeline_pb2.BoundingBox(
+                        x1=v["bbox"][0], y1=v["bbox"][1],
+                        x2=v["bbox"][2], y2=v["bbox"][3],
+                    ),
+                    track_id=v["track_id"],
+                ))
 
-        panel_lines = [f"Vehicles: {sum(current_counts.values())}"]
-        for cls, cnt in sorted(current_counts.items()):
-            panel_lines.append(f"  {cls}: {cnt}")
-        panel_lines.append(f"Tracks: {len(self.tracker.tracks)}")
-        y_off = 30
-        for line in panel_lines:
-            (tw, th), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
-            cv2.rectangle(annotated, (10, y_off - th - 4), (20 + tw, y_off + 4), COLOR_TEXT_BG, -1)
-            cv2.putText(annotated, line, (14, y_off),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (251, 146, 60), 1, cv2.LINE_AA)
-            y_off += th + 12
+            annotated = frame.copy()
+            for v in tracked:
+                color = CLASS_COLORS.get(v["class_name"], DEFAULT_COLOR)
+                x1, y1, x2, y2 = [int(c) for c in v["bbox"]]
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                label = f'#{v["track_id"]} {v["class_name"]} {v["confidence"]:.0%}'
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 8, y1), COLOR_TEXT_BG, -1)
+                cv2.putText(annotated, label, (x1 + 4, y1 - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
-        latency = round((time.time() - start) * 1000, 1)
-        logger.info(f"Tracked {len(vehicles)} vehicles in {latency}ms")
+            panel_lines = [f"Vehicles: {sum(current_counts.values())}"]
+            for cls, cnt in sorted(current_counts.items()):
+                panel_lines.append(f"  {cls}: {cnt}")
+            panel_lines.append(f"Tracks: {len(self.tracker.tracks)}")
+            y_off = 30
+            for line in panel_lines:
+                (tw, th), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                cv2.rectangle(annotated, (10, y_off - th - 4), (20 + tw, y_off + 4), COLOR_TEXT_BG, -1)
+                cv2.putText(annotated, line, (14, y_off),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (251, 146, 60), 1, cv2.LINE_AA)
+                y_off += th + 12
 
-        return pipeline_pb2.VehicleResponse(
-            current_total=sum(current_counts.values()),
-            active_tracks=len(self.tracker.tracks),
-            vehicles=vehicles,
-            current_counts=[
-                pipeline_pb2.VehicleCount(class_name=k, count=v)
-                for k, v in current_counts.items()
-            ],
-            cumulative=[
-                pipeline_pb2.VehicleCount(class_name=k, count=v)
-                for k, v in self.tracker.total_count.items()
-            ],
-            annotated_frame=encode_frame(annotated),
-            latency_ms=latency,
-        )
+            elapsed = round((time.time() - t_start) * 1000, 1)
+            span.set_attribute("response_time_ms", elapsed)
+            span.set_attribute("vehicle_count", len(vehicles))
+            _response_time.record(elapsed)
+
+            logger.info(f"Tracked {len(vehicles)} vehicles in {elapsed}ms")
+
+            return pipeline_pb2.VehicleResponse(
+                current_total=sum(current_counts.values()),
+                active_tracks=len(self.tracker.tracks),
+                vehicles=vehicles,
+                current_counts=[
+                    pipeline_pb2.VehicleCount(class_name=k, count=v)
+                    for k, v in current_counts.items()
+                ],
+                cumulative=[
+                    pipeline_pb2.VehicleCount(class_name=k, count=v)
+                    for k, v in self.tracker.total_count.items()
+                ],
+                annotated_frame=encode_frame(annotated),
+            )
 
 
 def serve():

@@ -39,6 +39,7 @@ spec:
   selector:
     app: vehicle
   ports:
-    - port: 50053
+    - name: grpc
+      port: 50053
       targetPort: 50053
   type: ClusterIP

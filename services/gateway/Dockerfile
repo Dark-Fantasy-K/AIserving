@@ -20,6 +20,7 @@ RUN mkdir -p proto_gen && \
     sed -i 's/^import pipeline_pb2/from . import pipeline_pb2/' proto_gen/pipeline_pb2_grpc.py && \
     touch proto_gen/__init__.py
 
+COPY telemetry.py .
 COPY services/gateway/server.py .
 
 EXPOSE 5000

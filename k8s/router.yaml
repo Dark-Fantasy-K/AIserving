@@ -44,6 +44,7 @@ spec:
   selector:
     app: router
   ports:
-    - port: 50051
+    - name: grpc
+      port: 50051
       targetPort: 50051
   type: ClusterIP

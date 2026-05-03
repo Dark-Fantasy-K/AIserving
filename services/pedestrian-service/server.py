@@ -16,9 +16,14 @@ from PIL import Image
 from ultralytics import YOLO
 
 from proto_gen import pipeline_pb2, pipeline_pb2_grpc
+from telemetry import setup, grpc_extract
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [PED] %(message)s")
 logger = logging.getLogger(__name__)
+
+tracer, meter = setup("pedestrian")
+_response_time   = meter.create_histogram("pedestrian.response_time_ms",   unit="ms", description="Full ProcessFrame RPC duration")
+_processing_time = meter.create_histogram("pedestrian.processing_time_ms", unit="ms", description="Pose inference duration")
 
 KEYPOINT_NAMES = [
     "nose", "left_eye", "right_eye", "left_ear", "right_ear",
@@ -41,13 +46,11 @@ COLOR_TEXT_BG = (18, 18, 26)
 
 
 def decode_frame(frame_msg):
-    """proto Frame → numpy RGB"""
     img = Image.open(io.BytesIO(frame_msg.data)).convert("RGB")
     return np.array(img)
 
 
 def encode_frame(frame_np, quality=85):
-    """numpy RGB → JPEG bytes"""
     img = Image.fromarray(frame_np)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=quality)
@@ -63,67 +66,76 @@ class PedestrianServicer(pipeline_pb2_grpc.PedestrianServiceServicer):
         logger.info(f"YOLOv8s-pose loaded in {time.time() - t0:.2f}s")
 
     def ProcessFrame(self, request, context):
-        start = time.time()
+        parent_ctx = grpc_extract(context)
+        t_start = time.time()
 
-        frame = decode_frame(request.frame)
-        results = self.pose_model(frame, verbose=False)[0]
+        with tracer.start_as_current_span("pedestrian.process_frame", context=parent_ctx) as span:
+            frame = decode_frame(request.frame)
 
-        persons = []
-        annotated = frame.copy()
+            with tracer.start_as_current_span("pedestrian.pose_inference") as proc_span:
+                t_proc = time.time()
+                results = self.pose_model(frame, verbose=False)[0]
+                proc_ms = round((time.time() - t_proc) * 1000, 1)
+                proc_span.set_attribute("processing_time_ms", proc_ms)
+                _processing_time.record(proc_ms)
 
-        if results.keypoints is not None:
-            kpts_data = results.keypoints.data.cpu().numpy()
-            boxes = results.boxes
+            persons = []
+            annotated = frame.copy()
 
-            for i in range(len(kpts_data)):
-                kpts = kpts_data[i]
-                bbox = boxes.xyxy[i].tolist()
-                conf = float(boxes.conf[i])
+            if results.keypoints is not None:
+                kpts_data = results.keypoints.data.cpu().numpy()
+                boxes = results.boxes
 
-                # proto keypoints
-                proto_kps = []
-                pts = []
-                for j, name in enumerate(KEYPOINT_NAMES):
-                    x, y, c = float(kpts[j][0]), float(kpts[j][1]), float(kpts[j][2])
-                    proto_kps.append(pipeline_pb2.Keypoint(
-                        name=name, x=round(x, 1), y=round(y, 1), confidence=round(c, 3)
+                for i in range(len(kpts_data)):
+                    kpts = kpts_data[i]
+                    bbox = boxes.xyxy[i].tolist()
+                    conf = float(boxes.conf[i])
+
+                    proto_kps = []
+                    pts = []
+                    for j, name in enumerate(KEYPOINT_NAMES):
+                        x, y, c = float(kpts[j][0]), float(kpts[j][1]), float(kpts[j][2])
+                        proto_kps.append(pipeline_pb2.Keypoint(
+                            name=name, x=round(x, 1), y=round(y, 1), confidence=round(c, 3)
+                        ))
+                        pts.append((int(x), int(y), c))
+
+                    persons.append(pipeline_pb2.PersonPose(
+                        bbox=pipeline_pb2.BoundingBox(
+                            x1=bbox[0], y1=bbox[1], x2=bbox[2], y2=bbox[3]
+                        ),
+                        confidence=round(conf, 4),
+                        keypoints=proto_kps,
                     ))
-                    pts.append((int(x), int(y), c))
 
-                persons.append(pipeline_pb2.PersonPose(
-                    bbox=pipeline_pb2.BoundingBox(
-                        x1=bbox[0], y1=bbox[1], x2=bbox[2], y2=bbox[3]
-                    ),
-                    confidence=round(conf, 4),
-                    keypoints=proto_kps,
-                ))
+                    x1, y1, x2, y2 = [int(v) for v in bbox]
+                    cv2.rectangle(annotated, (x1, y1), (x2, y2), COLOR_BBOX, 2)
+                    label = f'person {conf:.0%}'
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 8, y1), COLOR_TEXT_BG, -1)
+                    cv2.putText(annotated, label, (x1 + 4, y1 - 4),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BBOX, 1, cv2.LINE_AA)
 
-                # annotate
-                x1, y1, x2, y2 = [int(v) for v in bbox]
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), COLOR_BBOX, 2)
-                label = f'person {conf:.0%}'
-                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 8, y1), COLOR_TEXT_BG, -1)
-                cv2.putText(annotated, label, (x1 + 4, y1 - 4),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BBOX, 1, cv2.LINE_AA)
+                    for a, b in SKELETON:
+                        if pts[a][2] > 0.3 and pts[b][2] > 0.3:
+                            cv2.line(annotated, (pts[a][0], pts[a][1]),
+                                     (pts[b][0], pts[b][1]), COLOR_SKEL, 2, cv2.LINE_AA)
+                    for px, py, pc in pts:
+                        if pc > 0.3:
+                            cv2.circle(annotated, (px, py), 4, COLOR_KP, -1, cv2.LINE_AA)
 
-                for a, b in SKELETON:
-                    if pts[a][2] > 0.3 and pts[b][2] > 0.3:
-                        cv2.line(annotated, (pts[a][0], pts[a][1]),
-                                 (pts[b][0], pts[b][1]), COLOR_SKEL, 2, cv2.LINE_AA)
-                for px, py, pc in pts:
-                    if pc > 0.3:
-                        cv2.circle(annotated, (px, py), 4, COLOR_KP, -1, cv2.LINE_AA)
+            elapsed = round((time.time() - t_start) * 1000, 1)
+            span.set_attribute("response_time_ms", elapsed)
+            span.set_attribute("person_count", len(persons))
+            _response_time.record(elapsed)
 
-        latency = round((time.time() - start) * 1000, 1)
-        logger.info(f"Processed {len(persons)} persons in {latency}ms")
+            logger.info(f"Processed {len(persons)} persons in {elapsed}ms")
 
-        return pipeline_pb2.PedestrianResponse(
-            person_count=len(persons),
-            persons=persons,
-            annotated_frame=encode_frame(annotated),
-            latency_ms=latency,
-        )
+            return pipeline_pb2.PedestrianResponse(
+                person_count=len(persons),
+                persons=persons,
+                annotated_frame=encode_frame(annotated),
+            )
 
 
 def serve():

@@ -46,7 +46,7 @@ cmd_docker() {
 
     echo "  [3/4] router-service..."
     docker build \
-        -f "$ROOT/Dockerfile.router" \
+        -f "$SERVICES_DIR/router-service/Dockerfile" \
         -t "${REGISTRY}/router-service:${TAG}" \
         .
     echo "  ✓ ${REGISTRY}/router-service:${TAG}"
@@ -128,7 +128,7 @@ cmd_local() {
     sleep 3
 
     echo "Starting router on :50051..."
-    cd "$ROOT" && python server.py &
+    cd "$SERVICES_DIR/router-service" && python server.py &
     RTR_PID=$!
 
     sleep 3

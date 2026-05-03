@@ -11,6 +11,12 @@ protobuf>=4.25
 
 # --- Web ---
 flask>=3.0
+requests>=2.31
+
+# --- Observability ---
+opentelemetry-api>=1.20
+opentelemetry-sdk>=1.20
+opentelemetry-exporter-otlp-proto-grpc>=1.20
 
 # --- ML / CV ---
 ultralytics>=8.1

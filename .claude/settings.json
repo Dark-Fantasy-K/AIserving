@@ -7,5 +7,8 @@
       "Bash(/home/user/uservms/houy/AIserving/.venv/bin/python -c ' *)",
       "Bash(wget -q --show-progress https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4 -O datasets/person_vehicle.mp4)"
     ]
+  },
+  "enabledPlugins": {
+    "andrej-karpathy-skills@karpathy-skills": true
   }
 }

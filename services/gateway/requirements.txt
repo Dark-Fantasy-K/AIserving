@@ -5,3 +5,6 @@ protobuf>=4.25
 pillow>=10.0
 numpy>=1.24
 opencv-python-headless>=4.8
+opentelemetry-api>=1.20
+opentelemetry-sdk>=1.20
+opentelemetry-exporter-otlp-proto-grpc>=1.20

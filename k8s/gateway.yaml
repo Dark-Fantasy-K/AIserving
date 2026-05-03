@@ -43,6 +43,7 @@ spec:
   selector:
     app: gateway
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 5000
   type: NodePort
