@@ -55,7 +55,7 @@ def predict():
     file = request.files["image"]
     img_bytes = file.read()
 
-    # 获取尺寸
+
     img = Image.open(io.BytesIO(img_bytes))
     w, h = img.size
 
@@ -68,7 +68,6 @@ def predict():
         logger.error(f"gRPC error: {e}")
         return jsonify({"error": f"Router error: {e.details()}"}), 502
 
-    # 构造 JSON 响应
     result = {
         "total_latency_ms": resp.total_latency_ms,
         "total_detections": len(resp.all_detections),

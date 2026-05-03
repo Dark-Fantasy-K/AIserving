@@ -111,7 +111,6 @@ class VehicleServicer(pipeline_pb2_grpc.VehicleServiceServicer):
         start = time.time()
         frame = decode_frame(request.frame)
 
-        # 解析检测
         dets = []
         for d in request.detections:
             dets.append({
@@ -122,7 +121,6 @@ class VehicleServicer(pipeline_pb2_grpc.VehicleServiceServicer):
 
         tracked = self.tracker.update(dets)
 
-        # 统计
         current_counts = defaultdict(int)
         vehicles = []
         for v in tracked:
@@ -137,7 +135,6 @@ class VehicleServicer(pipeline_pb2_grpc.VehicleServiceServicer):
                 track_id=v["track_id"],
             ))
 
-        # 标注
         annotated = frame.copy()
         for v in tracked:
             color = CLASS_COLORS.get(v["class_name"], DEFAULT_COLOR)
@@ -149,7 +146,6 @@ class VehicleServicer(pipeline_pb2_grpc.VehicleServiceServicer):
             cv2.putText(annotated, label, (x1 + 4, y1 - 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
-        # 计数面板
         panel_lines = [f"Vehicles: {sum(current_counts.values())}"]
         for cls, cnt in sorted(current_counts.items()):
             panel_lines.append(f"  {cls}: {cnt}")

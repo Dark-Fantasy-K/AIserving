@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY mnt/user-data/outputs/yolo-microservices/pedestrian-service/requirements.txt .
+COPY services/pedestrian-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY pipeline.proto .
@@ -20,7 +20,7 @@ RUN mkdir -p proto_gen && \
     sed -i 's/^import pipeline_pb2/from . import pipeline_pb2/' proto_gen/pipeline_pb2_grpc.py && \
     touch proto_gen/__init__.py
 
-COPY mnt/user-data/outputs/yolo-microservices/pedestrian-service/server.py .
+COPY services/pedestrian-service/server.py .
 
 EXPOSE 50052
 CMD ["python", "server.py"]

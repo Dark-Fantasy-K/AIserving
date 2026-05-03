@@ -1,11 +1,8 @@
 version: "3.9"
 
 services:
-  # ---- 行人姿态估计 ----
   pedestrian:
-    build:
-      context: .
-      dockerfile: services/pedestrian-service/Dockerfile
+    image: kaikanghuang/pedestrian-service:latest
     container_name: pedestrian-svc
     ports:
       - "50052:50052"
@@ -14,11 +11,8 @@ services:
         limits:
           memory: 2G
 
-  # ---- 车辆计数跟踪 ----
   vehicle:
-    build:
-      context: .
-      dockerfile: services/vehicle-service/Dockerfile
+    image: kaikanghuang/vehicle-service:latest
     container_name: vehicle-svc
     ports:
       - "50053:50053"
@@ -27,11 +21,8 @@ services:
         limits:
           memory: 1G
 
-  # ---- Router (YOLO 检测 + 分发) ----
   router:
-    build:
-      context: .
-      dockerfile: Dockerfile.router
+    image: kaikanghuang/router-service:latest
     container_name: router-svc
     ports:
       - "50051:50051"
@@ -46,11 +37,8 @@ services:
         limits:
           memory: 2G
 
-  # ---- HTTP Gateway (对外入口) ----
   gateway:
-    build:
-      context: .
-      dockerfile: services/gateway/Dockerfile
+    image: kaikanghuang/gateway:latest
     container_name: gateway-svc
     ports:
       - "5000:5000"
