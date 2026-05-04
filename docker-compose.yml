@@ -1,34 +1,54 @@
 version: "3.9"
 
 services:
+  # ── Observability ──────────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: jaeger
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC (services → jaeger)
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  # ── Business Services ──────────────────────────────────────
   pedestrian:
-    image: kaikanghuang/pedestrian-service:latest
+    image: kaikanghuang/pedestrian-service:otel
     container_name: pedestrian-svc
     ports:
       - "50052:50052"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      - jaeger
     deploy:
       resources:
         limits:
           memory: 2G
 
   vehicle:
-    image: kaikanghuang/vehicle-service:latest
+    image: kaikanghuang/vehicle-service:otel
     container_name: vehicle-svc
     ports:
       - "50053:50053"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      - jaeger
     deploy:
       resources:
         limits:
           memory: 1G
 
   router:
-    image: kaikanghuang/router-service:latest
+    image: kaikanghuang/router-service:otel
     container_name: router-svc
     ports:
       - "50051:50051"
     environment:
       PEDESTRIAN_SERVICE_ADDR: pedestrian:50052
       VEHICLE_SERVICE_ADDR: vehicle:50053
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     depends_on:
       - pedestrian
       - vehicle
@@ -38,11 +58,13 @@ services:
           memory: 2G
 
   gateway:
-    image: kaikanghuang/gateway:latest
+    image: kaikanghuang/gateway:otel
     container_name: gateway-svc
     ports:
       - "5000:5000"
     environment:
       ROUTER_SERVICE_ADDR: router:50051
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     depends_on:
       - router
+      - jaeger

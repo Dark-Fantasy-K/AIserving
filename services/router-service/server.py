@@ -1,10 +1,10 @@
 """
 Router gRPC Service
 ───────────────────
-1. YOLOv8s 检测全图
-2. 按类别分流: person → Pedestrian Service, 车辆 → Vehicle Service
-3. 并行调用两个下游服务
-4. 合并标注图 + 结果返回
+1. Run YOLOv8s detection on the full frame.
+2. Route by class: person → Pedestrian Service, vehicles → Vehicle Service.
+3. Call both downstream services in parallel.
+4. Merge annotated frames and return combined results.
 """
 
 import io
@@ -92,7 +92,7 @@ class RouterServicer(pipeline_pb2_grpc.RouterServiceServicer):
             frame = decode_frame(request.frame)
             frame_jpeg = encode_frame_jpeg(frame)
 
-            # ---- 1) YOLO 检测 ----
+            # ---- 1) YOLO detection ----
             with tracer.start_as_current_span("router.yolo_inference") as proc_span:
                 t_proc = time.time()
                 yolo_results = self.detector(frame, verbose=False)[0]
@@ -130,7 +130,7 @@ class RouterServicer(pipeline_pb2_grpc.RouterServiceServicer):
                 f"{len(unhandled_dets)} other"
             )
 
-            # ---- 2) 并行调用下游服务 ----
+            # ---- 2) dispatch to downstream services in parallel ----
             frame_msg = pipeline_pb2.Frame(
                 data=frame_jpeg,
                 width=frame.shape[1],
@@ -167,7 +167,7 @@ class RouterServicer(pipeline_pb2_grpc.RouterServiceServicer):
                 except Exception as e:
                     logger.error(f"Vehicle service error: {e}")
 
-            # ---- 3) 合并标注图 ----
+            # ---- 3) merge annotated frames ----
             merged = merge_annotations(
                 frame_jpeg,
                 ped_response.annotated_frame if ped_response else None,

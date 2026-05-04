@@ -27,43 +27,50 @@ cmd_proto() {
 # ---- 2) 构建 Docker 镜像 ----
 # 每个镜像都以项目根为 build context，Dockerfile 内部自行生成 proto stubs
 cmd_docker() {
+    # 用法: ./build.sh docker [服务名...]
+    # 不传参数则构建全部；传名称则只构建指定服务
+    # 示例: ./build.sh docker router gateway
+    local targets=("${@:-pedestrian vehicle router gateway}")
+
     echo ">>> Building Docker images (context: $ROOT)..."
     cd "$ROOT"
 
-    echo "  [1/4] pedestrian-service..."
-    docker build \
-        -f "$SERVICES_DIR/pedestrian-service/Dockerfile" \
-        -t "${REGISTRY}/pedestrian-service:${TAG}" \
-        .
-    echo "  ✓ ${REGISTRY}/pedestrian-service:${TAG}"
-
-    echo "  [2/4] vehicle-service..."
-    docker build \
-        -f "$SERVICES_DIR/vehicle-service/Dockerfile" \
-        -t "${REGISTRY}/vehicle-service:${TAG}" \
-        .
-    echo "  ✓ ${REGISTRY}/vehicle-service:${TAG}"
-
-    echo "  [3/4] router-service..."
-    docker build \
-        -f "$SERVICES_DIR/router-service/Dockerfile" \
-        -t "${REGISTRY}/router-service:${TAG}" \
-        .
-    echo "  ✓ ${REGISTRY}/router-service:${TAG}"
-
-    echo "  [4/4] gateway..."
-    docker build \
-        -f "$SERVICES_DIR/gateway/Dockerfile" \
-        -t "${REGISTRY}/gateway:${TAG}" \
-        .
-    echo "  ✓ ${REGISTRY}/gateway:${TAG}"
+    local idx=0
+    for svc in "${targets[@]}"; do
+        idx=$((idx + 1))
+        case "$svc" in
+            pedestrian)
+                echo "  [$idx] pedestrian-service..."
+                docker build -f "$SERVICES_DIR/pedestrian-service/Dockerfile" \
+                    -t "${REGISTRY}/pedestrian-service:${TAG}" .
+                echo "  ✓ ${REGISTRY}/pedestrian-service:${TAG}"
+                ;;
+            vehicle)
+                echo "  [$idx] vehicle-service..."
+                docker build -f "$SERVICES_DIR/vehicle-service/Dockerfile" \
+                    -t "${REGISTRY}/vehicle-service:${TAG}" .
+                echo "  ✓ ${REGISTRY}/vehicle-service:${TAG}"
+                ;;
+            router)
+                echo "  [$idx] router-service..."
+                docker build -f "$SERVICES_DIR/router-service/Dockerfile" \
+                    -t "${REGISTRY}/router-service:${TAG}" .
+                echo "  ✓ ${REGISTRY}/router-service:${TAG}"
+                ;;
+            gateway)
+                echo "  [$idx] gateway..."
+                docker build -f "$SERVICES_DIR/gateway/Dockerfile" \
+                    -t "${REGISTRY}/gateway:${TAG}" .
+                echo "  ✓ ${REGISTRY}/gateway:${TAG}"
+                ;;
+            *)
+                warn "未知服务: $svc（可选: pedestrian vehicle router gateway）"
+                ;;
+        esac
+    done
 
     echo ""
-    echo "Done. Push with:"
-    echo "  docker push ${REGISTRY}/pedestrian-service:${TAG}"
-    echo "  docker push ${REGISTRY}/vehicle-service:${TAG}"
-    echo "  docker push ${REGISTRY}/router-service:${TAG}"
-    echo "  docker push ${REGISTRY}/gateway:${TAG}"
+    echo "Done."
 }
 
 # ---- 3) docker-compose 启动 ----
@@ -118,23 +125,23 @@ cmd_local() {
     fi
 
     echo "Starting pedestrian-service on :50052..."
-    cd "$SERVICES_DIR/pedestrian-service" && python server.py &
+    cd "$SERVICES_DIR/pedestrian-service" && PYTHONPATH="$ROOT" python server.py &
     PED_PID=$!
 
     echo "Starting vehicle-service on :50053..."
-    cd "$SERVICES_DIR/vehicle-service" && python server.py &
+    cd "$SERVICES_DIR/vehicle-service" && PYTHONPATH="$ROOT" python server.py &
     VEH_PID=$!
 
     sleep 3
 
     echo "Starting router on :50051..."
-    cd "$SERVICES_DIR/router-service" && python server.py &
+    cd "$SERVICES_DIR/router-service" && PYTHONPATH="$ROOT" python server.py &
     RTR_PID=$!
 
     sleep 3
 
     echo "Starting gateway on :5000..."
-    cd "$SERVICES_DIR/gateway" && python server.py &
+    cd "$SERVICES_DIR/gateway" && PYTHONPATH="$ROOT" python server.py &
     GW_PID=$!
 
     echo ""
@@ -153,7 +160,7 @@ cmd_local() {
 # ---- 入口 ----
 case "${1:-}" in
     proto)   cmd_proto ;;
-    docker)  cmd_docker ;;
+    docker)  shift; cmd_docker "$@" ;;
     compose) cmd_compose ;;
     k8s)     cmd_k8s ;;
     local)   cmd_local ;;
@@ -161,8 +168,8 @@ case "${1:-}" in
     *)
         echo "用法: $0 {proto|docker|compose|k8s|local|all}"
         echo ""
-        echo "  proto   - 生成 gRPC Python 代码"
-        echo "  docker  - 构建所有 Docker 镜像"
+        echo "  proto              - 生成 gRPC Python 代码"
+        echo "  docker [服务...]   - 构建指定镜像（不传则全部）"
         echo "  compose - docker-compose 本地启动"
         echo "  k8s     - 部署到 Kubernetes 集群"
         echo "  local   - 不用 Docker，直接本地跑 4 个进程"

@@ -1,7 +1,7 @@
 """
 Pedestrian gRPC Service
 ───────────────────────
-接收 person 检测 → YOLOv8s-pose 姿态估计 → 返回关键点 + 标注图
+Receives person detections → YOLOv8s-pose estimation → returns keypoints + annotated frame.
 """
 
 import io

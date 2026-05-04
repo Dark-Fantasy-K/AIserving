@@ -1,8 +1,8 @@
 """
 HTTP Gateway
 ────────────
-Flask 对外提供 HTTP + Web UI，内部调用 Router gRPC 获取结果。
-这是唯一暴露给用户的入口。
+Flask HTTP + Web UI frontend; proxies requests to the Router via gRPC.
+This is the sole external entry point exposed to clients.
 """
 
 import io

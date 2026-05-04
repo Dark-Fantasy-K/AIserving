@@ -1,0 +1,42 @@
+# Python 虚拟环境（最大，5.4GB）
+.venv/
+
+# Git 历史（1.7GB）
+.git/
+
+# 模型权重（不进镜像，运行时挂载）
+*.pt
+*.pth
+*.onnx
+
+# 数据集和样本
+datasets/
+samples/
+mnt/
+
+# 预生成的 proto stubs（Docker 内自行生成）
+proto_gen/
+generated/
+
+# 测试 / K8s / CI
+test/
+k8s/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 工具脚本（镜像不需要）
+build.sh
+setup.sh
+generate.sh
+
+# 文档
+README*.md
+
+# IDE / 编辑器
+.claude/
+.vscode/
+.idea/

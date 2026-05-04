@@ -1,7 +1,7 @@
 """
 Vehicle gRPC Service
 ────────────────────
-接收车辆检测 → IoU 跟踪 → 计数统计 → 返回标注图
+Receives vehicle detections → IoU-based tracking → count statistics → returns annotated frame.
 """
 
 import io

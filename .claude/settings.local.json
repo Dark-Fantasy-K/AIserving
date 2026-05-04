@@ -6,7 +6,11 @@
       "Bash(wget -q --show-progress https://github.com/intel-iot-devkit/sample-videos/raw/master/people-detection.mp4 -O datasets/people-detection.mp4)",
       "Bash(curl -s http://172.18.0.2:30708/health)",
       "Bash(ffmpeg -i /home/khuang/AIserving/samples/burst_traffic.mp4 -frames:v 1 -q:v 2 /tmp/test_frame.jpg -y)",
-      "Bash(curl -s -X POST http://172.18.0.2:30708/predict -F image=@/tmp/test_frame.jpg)"
+      "Bash(curl -s -X POST http://172.18.0.2:30708/predict -F image=@/tmp/test_frame.jpg)",
+      "Bash(docker system *)",
+      "Bash(lsblk)",
+      "Bash(docker compose *)",
+      "Bash(.venv/bin/python3 -c ' *)"
     ]
   }
 }

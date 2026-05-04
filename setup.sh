@@ -3,10 +3,11 @@
 #  setup.sh — 一键安装依赖 + 生成 gRPC 代码
 #
 #  用法:
-#    ./setup.sh           # 完整安装 (依赖 + proto)
+#    ./setup.sh           # 完整安装 (依赖 + proto + otel)
 #    ./setup.sh deps      # 仅安装 Python 依赖
 #    ./setup.sh proto     # 仅生成 gRPC stubs
 #    ./setup.sh venv      # 创建 venv 后再安装依赖
+#    ./setup.sh otel      # 仅安装 OpenTelemetry 包并验证
 # ============================================================
 
 set -e
@@ -136,6 +137,46 @@ cmd_proto() {
     ok "gRPC stubs 生成并分发完成"
 }
 
+# ---- 安装并验证 OpenTelemetry ----
+cmd_otel() {
+    check_python
+    echo ""
+    echo ">>> 安装 OpenTelemetry 包..."
+
+    OTEL_PKGS=(
+        "opentelemetry-api>=1.20"
+        "opentelemetry-sdk>=1.20"
+        "opentelemetry-exporter-otlp-proto-grpc>=1.20"
+    )
+
+    for pkg in "${OTEL_PKGS[@]}"; do
+        echo "  安装 $pkg ..."
+        $PY -m pip install "$pkg" -q
+    done
+    ok "OpenTelemetry 包安装完成"
+
+    echo ""
+    echo ">>> 验证 OpenTelemetry 导入..."
+    $PY - <<'PYEOF'
+from opentelemetry import trace, metrics, propagate
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader, ConsoleMetricExporter
+from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+print("  ✓ opentelemetry-api")
+print("  ✓ opentelemetry-sdk")
+print("  ✓ opentelemetry-exporter-otlp-proto-grpc")
+PYEOF
+    ok "OpenTelemetry 验证通过"
+
+    echo ""
+    echo "  提示: 设置 OTEL_EXPORTER_OTLP_ENDPOINT 环境变量以将数据上报至 Collector"
+    echo "  示例: export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317"
+}
+
 # ---- 完整安装 ----
 cmd_all() {
     echo "========================================"
@@ -143,6 +184,7 @@ cmd_all() {
     echo "========================================"
     echo ""
     cmd_deps
+    cmd_otel
     cmd_proto
     echo ""
     echo "========================================"
@@ -160,14 +202,16 @@ case "${1:-all}" in
     deps)  cmd_deps ;;
     proto) cmd_proto ;;
     venv)  cmd_venv ;;
+    otel)  cmd_otel ;;
     all)   cmd_all ;;
     *)
-        echo "用法: $0 [deps|proto|venv|all]"
+        echo "用法: $0 [deps|proto|venv|otel|all]"
         echo ""
-        echo "  (无参数) / all  — 完整安装: 依赖 + proto stubs"
+        echo "  (无参数) / all  — 完整安装: 依赖 + otel + proto stubs"
         echo "  deps            — 仅安装 Python 依赖"
         echo "  proto           — 仅生成 gRPC stubs"
         echo "  venv            — 创建 .venv 后安装依赖"
+        echo "  otel            — 仅安装 OpenTelemetry 包并验证"
         exit 1
         ;;
 esac
