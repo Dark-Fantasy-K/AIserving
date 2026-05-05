@@ -163,6 +163,12 @@ docker compose version
 
 ---
 
+## 可观测性
+
+分布式追踪（Jaeger）、指标采集（Prometheus）和 Dashboard（Grafana）已通过 Docker Compose 集成。完整的配置说明、访问地址和常见问题排查见 **[observability/README.md](observability/README.md)**。
+
+---
+
 ## 快速开始
 
 ### 本地运行（无 Docker）

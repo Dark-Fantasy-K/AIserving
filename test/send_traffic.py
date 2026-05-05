@@ -3,8 +3,8 @@
 Send video frames to the gateway /predict endpoint to generate load.
 
 Usage:
-  python test/send_traffic.py
-  python test/send_traffic.py --video samples/traffic_car.mp4 --fps 2 --loops 3
+  python3 test/send_traffic.py
+  python3 test/send_traffic.py --video samples/traffic_car.mp4 --fps 2 --loops 3
 """
 import argparse
 import io

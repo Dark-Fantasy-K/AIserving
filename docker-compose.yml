@@ -7,9 +7,43 @@ services:
     container_name: jaeger
     ports:
       - "16686:16686"   # UI
-      - "4317:4317"     # OTLP gRPC (services → jaeger)
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.101.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"     # OTLP gRPC (services → collector)
+      - "8889:8889"     # Prometheus scrape endpoint
+    depends_on:
+      - jaeger
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - jaeger
 
   # ── Business Services ──────────────────────────────────────
   pedestrian:
@@ -18,9 +52,9 @@ services:
     ports:
       - "50052:50052"
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
-      - jaeger
+      - otel-collector
     deploy:
       resources:
         limits:
@@ -32,9 +66,9 @@ services:
     ports:
       - "50053:50053"
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
-      - jaeger
+      - otel-collector
     deploy:
       resources:
         limits:
@@ -48,10 +82,11 @@ services:
     environment:
       PEDESTRIAN_SERVICE_ADDR: pedestrian:50052
       VEHICLE_SERVICE_ADDR: vehicle:50053
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       - pedestrian
       - vehicle
+      - otel-collector
     deploy:
       resources:
         limits:
@@ -64,7 +99,7 @@ services:
       - "5000:5000"
     environment:
       ROUTER_SERVICE_ADDR: router:50051
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       - router
-      - jaeger
+      - otel-collector

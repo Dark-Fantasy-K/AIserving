@@ -160,6 +160,12 @@ docker compose version
 
 ---
 
+## Observability
+
+Distributed tracing (Jaeger), metrics (Prometheus), and dashboards (Grafana) are set up via Docker Compose. See **[observability/README.md](observability/README.md)** for the full setup guide, access URLs, and troubleshooting.
+
+---
+
 ## Quick Start
 
 ### Local (No Docker)

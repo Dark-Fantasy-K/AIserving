@@ -68,7 +68,7 @@ def predict():
         req = pipeline_pb2.RouterRequest(frame=frame)
 
         try:
-            resp = router_stub.Detect(req, timeout=60, metadata=grpc_inject())
+            resp = router_stub.Detect(req, timeout=1, metadata=grpc_inject())
         except grpc.RpcError as e:
             logger.error(f"gRPC error: {e}")
             elapsed = (time.time() - t_start) * 1000

@@ -10,7 +10,10 @@
       "Bash(docker system *)",
       "Bash(lsblk)",
       "Bash(docker compose *)",
-      "Bash(.venv/bin/python3 -c ' *)"
+      "Bash(.venv/bin/python3 -c ' *)",
+      "Bash(curl -s http://localhost:8889/metrics)",
+      "Bash(curl -v http://localhost:8889/metrics)",
+      "Bash(curl -s http://localhost:8888/metrics)"
     ]
   }
 }
