@@ -64,7 +64,7 @@ cmd_docker() {
                 echo "  ✓ ${REGISTRY}/gateway:${TAG}"
                 ;;
             *)
-                warn "未知服务: $svc（可选: pedestrian vehicle router gateway）"
+                echo "未知服务: $svc（可选: pedestrian vehicle router gateway）" >&2
                 ;;
         esac
     done
@@ -115,33 +115,99 @@ cmd_k8s() {
 }
 
 # ---- 5) 本地开发（不用 Docker）----
+
+# 判断是否需要重新生成 gRPC stubs
+# 返回 0 = 需要，1 = 无需
+_needs_proto() {
+    local proto="$ROOT/pipeline.proto"
+    local targets=(
+        "$ROOT/proto_gen/pipeline_pb2.py"
+        "$SERVICES_DIR/gateway/proto_gen/pipeline_pb2.py"
+        "$SERVICES_DIR/pedestrian-service/proto_gen/pipeline_pb2.py"
+        "$SERVICES_DIR/vehicle-service/proto_gen/pipeline_pb2.py"
+    )
+    for t in "${targets[@]}"; do
+        [ ! -f "$t" ] && return 0
+        [ "$proto" -nt "$t" ] && return 0
+    done
+    return 1
+}
+
 cmd_local() {
     echo ">>> Starting all services locally..."
 
-    # 先确保 proto stubs 已生成
-    if [ ! -f "$ROOT/proto_gen/pipeline_pb2.py" ]; then
-        echo "  proto stubs 未找到，先生成..."
+    PYTHON="${ROOT}/.venv/bin/python"
+    if [ ! -x "$PYTHON" ]; then
+        PYTHON="$(command -v python3 || command -v python)"
+    fi
+    echo "Using Python: $PYTHON"
+
+    if _needs_proto; then
+        echo ">>> pipeline.proto 有变更，重新生成 gRPC stubs..."
         cmd_proto
+    else
+        echo ">>> gRPC stubs 已是最新，跳过生成"
     fi
 
+    # ---- 检查 ONNX 模型文件 ----
+    local det_model="$ROOT/triton-models/yolov8s/1/model.onnx"
+    local pose_model="$ROOT/triton-models/yolov8s-pose/1/model.onnx"
+    if [ ! -f "$det_model" ] || [ ! -f "$pose_model" ]; then
+        echo ">>> ONNX 模型文件缺失，正在导出..."
+        cd "$ROOT" && "$PYTHON" scripts/export_models.py
+    else
+        echo ">>> ONNX 模型已存在，跳过导出"
+    fi
+
+    # ---- 启动 Triton（通过 Docker）----
+    local triton_status
+    triton_status=$(docker inspect --format '{{.State.Status}}' triton 2>/dev/null || echo "missing")
+
+    if [ "$triton_status" = "running" ]; then
+        echo ">>> Triton 已在运行，跳过启动"
+    else
+        if [ "$triton_status" = "missing" ]; then
+            echo ">>> 启动 Triton 容器..."
+            docker run -d \
+                --name triton \
+                -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+                -v "$ROOT/triton-models:/models" \
+                nvcr.io/nvidia/tritonserver:24.05-py3 \
+                tritonserver --model-repository=/models --log-verbose=0
+        else
+            echo ">>> 重启已停止的 Triton 容器..."
+            docker start triton
+        fi
+        echo ">>> 等待 Triton 模型加载..."
+        for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/v2/health/ready >/dev/null 2>&1; then
+                echo ">>> Triton ready"
+                break
+            fi
+            sleep 2
+        done
+    fi
+
+    export TRITON_URL="localhost:8001"
+
     echo "Starting pedestrian-service on :50052..."
-    cd "$SERVICES_DIR/pedestrian-service" && PYTHONPATH="$ROOT" python server.py &
+    cd "$SERVICES_DIR/pedestrian-service" && PYTHONPATH="$ROOT" "$PYTHON" server.py &
     PED_PID=$!
 
     echo "Starting vehicle-service on :50053..."
-    cd "$SERVICES_DIR/vehicle-service" && PYTHONPATH="$ROOT" python server.py &
+    cd "$SERVICES_DIR/vehicle-service" && PYTHONPATH="$ROOT" "$PYTHON" server.py &
     VEH_PID=$!
 
     sleep 3
 
     echo "Starting router on :50051..."
-    cd "$SERVICES_DIR/router-service" && PYTHONPATH="$ROOT" python server.py &
+    cd "$SERVICES_DIR/router-service" && PYTHONPATH="$ROOT" "$PYTHON" server.py &
     RTR_PID=$!
 
     sleep 3
 
     echo "Starting gateway on :5000..."
-    cd "$SERVICES_DIR/gateway" && PYTHONPATH="$ROOT" python server.py &
+    cd "$SERVICES_DIR/gateway" && PYTHONPATH="$ROOT" "$PYTHON" server.py &
     GW_PID=$!
 
     echo ""
@@ -153,7 +219,7 @@ cmd_local() {
     echo ""
     echo "Press Ctrl+C to stop all"
 
-    trap "kill $PED_PID $VEH_PID $RTR_PID $GW_PID 2>/dev/null" EXIT
+    trap "kill $PED_PID $VEH_PID $RTR_PID $GW_PID 2>/dev/null; docker stop triton 2>/dev/null" EXIT
     wait
 }
 

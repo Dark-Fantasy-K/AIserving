@@ -13,7 +13,24 @@
       "Bash(.venv/bin/python3 -c ' *)",
       "Bash(curl -s http://localhost:8889/metrics)",
       "Bash(curl -v http://localhost:8889/metrics)",
-      "Bash(curl -s http://localhost:8888/metrics)"
+      "Bash(curl -s http://localhost:8888/metrics)",
+      "Bash(curl -s \"http://localhost:16686/api/services\")",
+      "Bash(curl -s http://172.18.0.4:32014/api/v1/targets)",
+      "Bash(REGISTRY=kaikanghuang TAG=crop ./build.sh docker *)",
+      "Bash(docker build *)",
+      "Bash(python -c \"from proto_gen import pipeline_pb2; print\\(dir\\(pipeline_pb2\\)\\)\")",
+      "Bash(python -m grpc_tools.protoc -I . --python_out=proto_gen --pyi_out=proto_gen --grpc_python_out=proto_gen pipeline.proto)",
+      "Bash(.venv/bin/python -m grpc_tools.protoc -I . --python_out=proto_gen --pyi_out=proto_gen --grpc_python_out=proto_gen pipeline.proto)",
+      "Bash(.venv/bin/python -c \"from proto_gen import pipeline_pb2; print\\('PersonCrop:', hasattr\\(pipeline_pb2, 'PersonCrop'\\)\\); print\\('ProcessCrops in grpc:', 'ProcessCrops' in open\\('proto_gen/pipeline_pb2_grpc.py'\\).read\\(\\)\\)\")",
+      "Bash([ -d \"$svc/proto_gen\" ])",
+      "Bash(pkill -f \"python.*server.py\")",
+      "Bash(./build.sh local *)",
+      "Bash(curl -s -X POST http://localhost:5000/predict -F \"image=@datasets/persons.mp4\")",
+      "Bash(curl -s http://localhost:5000/health)",
+      "Bash(curl -s \"http://172.18.0.4:32012/api/traces/ed0091e219a8af596940584489056475\")",
+      "Bash(fuser -v 50051/tcp)",
+      "Bash(git checkout *)",
+      "Bash(git push *)"
     ]
   }
 }

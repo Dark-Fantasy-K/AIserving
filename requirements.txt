@@ -5,9 +5,10 @@
 # ============================================================
 
 # --- gRPC ---
-grpcio>=1.60
-grpcio-tools>=1.60
+grpcio==1.67.1
+grpcio-tools==1.67.1
 protobuf>=4.25
+aiohttp>=3.8
 
 # --- Web ---
 flask>=3.0
@@ -19,9 +20,12 @@ opentelemetry-sdk>=1.20
 opentelemetry-exporter-otlp-proto-grpc>=1.20
 
 # --- ML / CV ---
-ultralytics>=8.1
-torch>=2.1
-torchvision>=0.16
+tritonclient[grpc]>=2.40
 opencv-python-headless>=4.8
 pillow>=10.0
 numpy>=1.24
+
+# --- Model export (run scripts/export_models.py once, not needed at runtime) ---
+# ultralytics>=8.1
+# torch>=2.1
+# torchvision>=0.16

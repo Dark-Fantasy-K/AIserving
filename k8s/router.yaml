@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: router
-          image: kaikanghuang/router-service:latest
+          image: kaikanghuang/router-service:crop
           ports:
             - containerPort: 50051
           env:
@@ -24,6 +24,14 @@ spec:
               value: "pedestrian:50052"
             - name: VEHICLE_SERVICE_ADDR
               value: "vehicle:50053"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.monitoring.svc.cluster.local:4317"
+            - name: PED_CHANNELS
+              value: "4"
+            - name: PED_CROP_CHUNK_SIZE
+              value: "8"    # k8s multi-pod: smaller chunks spread load across pods
+            - name: PED_CROP_PADDING_RATIO
+              value: "0.15"
           resources:
             limits:
               memory: "2Gi"

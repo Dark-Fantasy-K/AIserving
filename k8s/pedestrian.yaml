@@ -16,15 +16,23 @@ spec:
     spec:
       containers:
         - name: pedestrian
-          image: kaikanghuang/pedestrian-service:latest
+          image: kaikanghuang/pedestrian-service:crop
           ports:
             - containerPort: 50052
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.monitoring.svc.cluster.local:4317"
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: MKL_NUM_THREADS
+              value: "2"
           resources:
             limits:
               memory: "2Gi"
+              cpu: "2"
             requests:
               memory: "512Mi"
-              cpu: "250m"
+              cpu: "500m"
           readinessProbe:
             tcpSocket:
               port: 50052

@@ -16,12 +16,14 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: kaikanghuang/gateway:latest
+          image: kaikanghuang/gateway:crop
           ports:
             - containerPort: 5000
           env:
             - name: ROUTER_SERVICE_ADDR
               value: "router:50051"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.monitoring.svc.cluster.local:4317"
           resources:
             limits:
               memory: "1Gi"

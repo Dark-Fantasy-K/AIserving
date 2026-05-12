@@ -25,8 +25,8 @@ A real-time object detection microservices system based on YOLOv8, using gRPC co
 | Service | Port | Function |
 |---------|------|----------|
 | Gateway | 5000 (HTTP) | External REST entry point, forwards images to Router |
-| Router | 50051 (gRPC) | YOLOv8s detection, dispatches person/vehicle results |
-| Pedestrian | 50052 (gRPC) | YOLOv8s-pose keypoint estimation |
+| Router | 50051 (gRPC) | YOLOv8m detection, dispatches person/vehicle results |
+| Pedestrian | 50052 (gRPC) | YOLOv8m-pose keypoint estimation |
 | Vehicle | 50053 (gRPC) | IoU tracking + vehicle-class counting |
 
 ## Directory Structure
@@ -45,10 +45,14 @@ AIserving/
 ├── all-in-one.yaml                 # Kubernetes manifests
 ├── validate_video.py               # Video dataset validation script
 ├── make_burst_dataset.py           # Synthetic burst-traffic video generator
-├── yolov8s.pt                      # YOLOv8s weights (router)
 ├── samples/                        # Sample video datasets
 │   ├── person_vehicle.mp4          # Real traffic (persons + bicycles + cars)
 │   └── burst_traffic.mp4           # Synthetic burst: idle → crowd surge → dense
+├── k8s/
+│   ├── models-pvc.yaml             # PersistentVolume + PVC for model storage
+│   ├── keda/
+│   │   └── scaledobjects.yaml      # KEDA autoscaling for pedestrian + vehicle
+│   └── observability/              # Prometheus, Grafana, Jaeger, OTel manifests
 └── services/
     ├── gateway/
     │   ├── server.py
@@ -56,10 +60,9 @@ AIserving/
     │   ├── Dockerfile
     │   └── proto_gen/
     ├── pedestrian-service/
-    │   ├── server.py
+    │   ├── server.py               # Loads model from MODEL_PATH env (yolov8m-pose.pt)
     │   ├── requirements.txt
     │   ├── Dockerfile
-    │   ├── yolov8s-pose.pt
     │   └── proto_gen/
     └── vehicle-service/
         ├── server.py
@@ -196,7 +199,59 @@ docker push your-registry/gateway:latest
 REGISTRY=your-registry ./build.sh k8s      # Deploy
 ```
 
+**Prepare model storage (one-time):**
+
+Models are loaded from a PersistentVolume mounted at `/model` inside each container. Place the model files on the node before deploying:
+
+```bash
+sudo mkdir -p /data/models
+python3 -c "from ultralytics import YOLO; YOLO('yolov8m.pt'); YOLO('yolov8m-pose.pt')"
+sudo cp ~/.config/Ultralytics/yolov8m.pt /data/models/
+sudo cp ~/.config/Ultralytics/yolov8m-pose.pt /data/models/
+
+kubectl apply -f k8s/models-pvc.yaml
+```
+
+| Service | Model | Mount |
+|---------|-------|-------|
+| Router | `yolov8m.pt` | `/model/yolov8m.pt` |
+| Pedestrian | `yolov8m-pose.pt` | `/model/yolov8m-pose.pt` |
+
+The model variant can be overridden per-deployment via the `MODEL_PATH` environment variable.
+
 Access via NodePort: `http://<node-ip>:30500`
+
+### Autoscaling (KEDA)
+
+KEDA dynamically scales the `pedestrian` and `vehicle` deployments based on CPU and memory utilization.
+
+**Install KEDA** (one-time, requires cluster-admin):
+
+```bash
+kubectl apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.16.0/keda-2.16.0.yaml
+```
+
+**Deploy ScaledObjects:**
+
+```bash
+kubectl apply -f k8s/keda/scaledobjects.yaml
+```
+
+**Verify:**
+
+```bash
+kubectl get scaledobject    # READY=True when active
+kubectl get hpa             # KEDA-managed HPAs
+```
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `minReplicaCount` | 1 | Always keep at least 1 replica |
+| `maxReplicaCount` | 5 | Scale up to 5 replicas |
+| CPU trigger | 60% | Scale out when CPU utilization > 60% of request |
+| Memory trigger | 70% | Scale out when memory utilization > 70% of request |
+| `pollingInterval` | 15s | Check metrics every 15 seconds |
+| `cooldownPeriod` | 120s | Wait 2 minutes before scaling down |
 
 ---
 
@@ -415,6 +470,10 @@ kubectl -n yolo-pipeline get pods -o wide
 
 # Stream service logs
 kubectl -n yolo-pipeline logs -f deployment/router
+
+# Check autoscaling status
+kubectl get scaledobject
+kubectl get hpa
 ```
 
 

@@ -8,7 +8,7 @@
       "targetBlank": true,
       "title": "Jaeger UI",
       "type": "link",
-      "url": "http://localhost:16686"
+      "url": "http://172.18.0.3:16686"
     }
   ],
   "panels": [
@@ -404,7 +404,7 @@
           "datasource": {"type": "jaeger", "uid": "jaeger"},
           "queryType": "search",
           "refId": "A",
-          "service": ""
+          "service": "gateway"
         }
       ],
       "title": "Traces (Jaeger)",

@@ -24,8 +24,8 @@
 | 服务 | 端口 | 功能 |
 |------|------|------|
 | Gateway | 5000 (HTTP) | 对外 REST 入口，转发图像到 Router |
-| Router | 50051 (gRPC) | YOLOv8s 检测，分流 person/vehicle |
-| Pedestrian | 50052 (gRPC) | YOLOv8s-pose 姿态估计 |
+| Router | 50051 (gRPC) | YOLOv8m 检测，分流 person/vehicle |
+| Pedestrian | 50052 (gRPC) | YOLOv8m-pose 姿态估计 |
 | Vehicle | 50053 (gRPC) | IoU 跟踪 + 车型计数 |
 
 ## 目录结构
@@ -44,10 +44,14 @@ AIserving/
 ├── all-in-one.yaml                 # Kubernetes 部署清单
 ├── validate_video.py               # 视频数据集验证脚本
 ├── make_burst_dataset.py           # 合成突发流量视频生成器
-├── yolov8s.pt                      # YOLOv8s 权重（Router）
 ├── samples/                        # 样本视频数据集
 │   ├── person_vehicle.mp4          # 真实交通视频（行人 + 自行车 + 车辆）
 │   └── burst_traffic.mp4           # 合成突发流量：空白 → 人群涌入 → 持续拥挤
+├── k8s/
+│   ├── models-pvc.yaml             # 模型存储的 PersistentVolume + PVC
+│   ├── keda/
+│   │   └── scaledobjects.yaml      # pedestrian + vehicle 自动扩缩容
+│   └── observability/              # Prometheus、Grafana、Jaeger、OTel 部署清单
 └── services/
     ├── gateway/
     │   ├── server.py
@@ -55,10 +59,9 @@ AIserving/
     │   ├── Dockerfile
     │   └── proto_gen/
     ├── pedestrian-service/
-    │   ├── server.py
+    │   ├── server.py               # 从 MODEL_PATH 环境变量加载模型（yolov8m-pose.pt）
     │   ├── requirements.txt
     │   ├── Dockerfile
-    │   ├── yolov8s-pose.pt
     │   └── proto_gen/
     └── vehicle-service/
         ├── server.py
@@ -199,7 +202,59 @@ docker push your-registry/gateway:latest
 REGISTRY=your-registry ./build.sh k8s      # 部署
 ```
 
+**准备模型存储（一次性操作）：**
+
+模型通过 PersistentVolume 挂载到容器内的 `/model` 路径，部署前需在节点上准备好模型文件：
+
+```bash
+sudo mkdir -p /data/models
+python3 -c "from ultralytics import YOLO; YOLO('yolov8m.pt'); YOLO('yolov8m-pose.pt')"
+sudo cp ~/.config/Ultralytics/yolov8m.pt /data/models/
+sudo cp ~/.config/Ultralytics/yolov8m-pose.pt /data/models/
+
+kubectl apply -f k8s/models-pvc.yaml
+```
+
+| 服务 | 模型 | 挂载路径 |
+|------|------|----------|
+| Router | `yolov8m.pt` | `/model/yolov8m.pt` |
+| Pedestrian | `yolov8m-pose.pt` | `/model/yolov8m-pose.pt` |
+
+可通过 `MODEL_PATH` 环境变量按需覆盖模型路径，无需重新构建镜像。
+
 访问：`http://<node-ip>:30500`
+
+### 自动扩缩容（KEDA）
+
+KEDA 根据 CPU 和内存利用率动态扩缩 `pedestrian` 和 `vehicle` 服务。
+
+**安装 KEDA**（一次性操作，需要 cluster-admin 权限）：
+
+```bash
+kubectl apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.16.0/keda-2.16.0.yaml
+```
+
+**部署 ScaledObjects：**
+
+```bash
+kubectl apply -f k8s/keda/scaledobjects.yaml
+```
+
+**验证：**
+
+```bash
+kubectl get scaledobject    # READY=True 表示生效
+kubectl get hpa             # KEDA 自动创建的 HPA
+```
+
+| 参数 | 值 | 说明 |
+|------|----|----|
+| `minReplicaCount` | 1 | 最少保持 1 个副本 |
+| `maxReplicaCount` | 5 | 最多扩容到 5 个副本 |
+| CPU 触发阈值 | 60% | CPU 使用率超过请求值的 60% 时扩容 |
+| 内存触发阈值 | 70% | 内存使用率超过请求值的 70% 时扩容 |
+| `pollingInterval` | 15s | 每 15 秒检查一次指标 |
+| `cooldownPeriod` | 120s | 缩容前等待 2 分钟，防止频繁抖动 |
 
 ---
 
@@ -417,4 +472,8 @@ kubectl -n yolo-pipeline get pods -o wide
 
 # K8s 查看服务日志
 kubectl -n yolo-pipeline logs -f deployment/router
+
+# 查看自动扩缩容状态
+kubectl get scaledobject
+kubectl get hpa
 ```

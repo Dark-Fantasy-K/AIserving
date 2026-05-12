@@ -16,9 +16,12 @@ spec:
     spec:
       containers:
         - name: vehicle
-          image: kaikanghuang/vehicle-service:latest
+          image: kaikanghuang/vehicle-service:otel
           ports:
             - containerPort: 50053
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.monitoring.svc.cluster.local:4317"
           resources:
             limits:
               memory: "1Gi"

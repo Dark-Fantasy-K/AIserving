@@ -45,20 +45,39 @@ services:
       - prometheus
       - jaeger
 
+  # ── Inference ─────────────────────────────────────────────
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.05-py3
+    container_name: triton
+    command: ["tritonserver", "--model-repository=/models", "--log-verbose=0"]
+    volumes:
+      - ./triton-models:/models
+    ports:
+      - "8000:8000"   # HTTP
+      - "8001:8001"   # gRPC
+      - "8002:8002"   # Prometheus metrics
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
   # ── Business Services ──────────────────────────────────────
   pedestrian:
-    image: kaikanghuang/pedestrian-service:otel
+    image: kaikanghuang/pedestrian-service:triton
     container_name: pedestrian-svc
     ports:
       - "50052:50052"
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      TRITON_URL: triton:8001
+      POSE_MODEL: yolov8s-pose
     depends_on:
       - otel-collector
+      - triton
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
 
   vehicle:
     image: kaikanghuang/vehicle-service:otel
@@ -75,7 +94,7 @@ services:
           memory: 1G
 
   router:
-    image: kaikanghuang/router-service:otel
+    image: kaikanghuang/router-service:triton
     container_name: router-svc
     ports:
       - "50051:50051"
@@ -83,17 +102,23 @@ services:
       PEDESTRIAN_SERVICE_ADDR: pedestrian:50052
       VEHICLE_SERVICE_ADDR: vehicle:50053
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      TRITON_URL: triton:8001
+      DET_MODEL: yolov8s
+      PED_CHANNELS: "2"
+      PED_CROP_CHUNK_SIZE: "32"
+      PED_CROP_PADDING_RATIO: "0.15"
     depends_on:
       - pedestrian
       - vehicle
       - otel-collector
+      - triton
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
 
   gateway:
-    image: kaikanghuang/gateway:otel
+    image: kaikanghuang/gateway:crop
     container_name: gateway-svc
     ports:
       - "5000:5000"

@@ -55,8 +55,33 @@ message PedestrianResponse {
   bytes               annotated_frame = 3;
 }
 
+// Crop-based pedestrian dispatch (Router crops each person, sends small images)
+message PersonCrop {
+  bytes       data      = 1;  // JPEG bytes of the cropped person region
+  int32       width     = 2;
+  int32       height    = 3;
+  int32       crop_id   = 4;
+  BoundingBox crop_bbox = 5;  // crop origin in original-frame coordinates (after padding/clamping)
+}
+
+message PedestrianCropRequest {
+  repeated PersonCrop crops = 1;
+}
+
+message PersonPoseResult {
+  int32             crop_id    = 1;
+  repeated Keypoint keypoints  = 2;  // in original-frame coordinates
+  float             confidence = 3;
+  BoundingBox       bbox       = 4;  // person bbox in original frame
+}
+
+message PedestrianCropResponse {
+  repeated PersonPoseResult poses = 1;
+}
+
 service PedestrianService {
-  rpc ProcessFrame (PedestrianRequest) returns (PedestrianResponse);
+  rpc ProcessFrame (PedestrianRequest)     returns (PedestrianResponse);
+  rpc ProcessCrops (PedestrianCropRequest) returns (PedestrianCropResponse);
 }
 
 // ============================================================

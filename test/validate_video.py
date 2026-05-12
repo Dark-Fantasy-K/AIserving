@@ -6,7 +6,7 @@ sending videos per frame to Gateway HTTP /predict
 Usage:
   python3 test/validate_video.py
   python3 test/validate_video.py --video samples/burst_traffic.mp4 --gateway http://172.18.0.3:30708
-  python3 test/validate_video.py --out test/output_annotated.mp4 --max-frames 100
+  python3 test/validate_video.py --video samples/simple_test.mp4 --gateway http://localhost:5000 --out samples/st_annotated.mp4
 """
 
 import io
@@ -85,7 +85,7 @@ def run(video_path: str, gateway_url: str, max_frames: int, out_path: str | None
             resp = session.post(
                 predict_url,
                 files={"image": ("frame.jpg", jpeg_bytes, "image/jpeg")},
-                timeout=1, # seconds
+                timeout=30, # seconds
             )
             resp.raise_for_status()
         except requests.RequestException as e:
