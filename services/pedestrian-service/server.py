@@ -12,8 +12,11 @@ from concurrent import futures
 import cv2
 import grpc
 import numpy as np
+import torch
 from PIL import Image
 from ultralytics import YOLO
+
+DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
 from proto_gen import pipeline_pb2, pipeline_pb2_grpc
 from telemetry import setup, grpc_extract
@@ -63,7 +66,8 @@ class PedestrianServicer(pipeline_pb2_grpc.PedestrianServiceServicer):
         logger.info("Loading YOLOv8s-pose...")
         t0 = time.time()
         self.pose_model = YOLO("yolov8s-pose.pt")
-        logger.info(f"YOLOv8s-pose loaded in {time.time() - t0:.2f}s")
+        self.pose_model.to(DEVICE)
+        logger.info(f"YOLOv8s-pose loaded in {time.time() - t0:.2f}s (device={DEVICE})")
 
     def ProcessFrame(self, request, context):
         parent_ctx = grpc_extract(context)
@@ -74,7 +78,7 @@ class PedestrianServicer(pipeline_pb2_grpc.PedestrianServiceServicer):
 
             with tracer.start_as_current_span("pedestrian.pose_inference") as proc_span:
                 t_proc = time.time()
-                results = self.pose_model(frame, verbose=False)[0]
+                results = self.pose_model(frame, verbose=False, device=DEVICE)[0]
                 proc_ms = round((time.time() - t_proc) * 1000, 1)
                 proc_span.set_attribute("processing_time_ms", proc_ms)
                 _processing_time.record(proc_ms)

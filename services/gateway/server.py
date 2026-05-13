@@ -54,21 +54,27 @@ def health():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    if "image" not in request.files:
-        return jsonify({"error": "no image field"}), 400
-
     t_start = time.time()
     with tracer.start_as_current_span("gateway.predict") as span:
-        file = request.files["image"]
-        img_bytes = file.read()
-        img = Image.open(io.BytesIO(img_bytes))
+        if request.content_type == "image/jpeg":
+            img_bytes = request.data
+        elif "image" in request.files:
+            img_bytes = request.files["image"].read()
+        else:
+            return jsonify({"error": "no image"}), 400
+
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        img.thumbnail((640, 640), Image.BILINEAR)
         w, h = img.size
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        img_bytes = buf.getvalue()
 
         frame = pipeline_pb2.Frame(data=img_bytes, width=w, height=h)
         req = pipeline_pb2.RouterRequest(frame=frame)
 
         try:
-            resp = router_stub.Detect(req, timeout=1, metadata=grpc_inject())
+            resp = router_stub.Detect(req, timeout=10, metadata=grpc_inject())
         except grpc.RpcError as e:
             logger.error(f"gRPC error: {e}")
             elapsed = (time.time() - t_start) * 1000
@@ -77,9 +83,10 @@ def predict():
             _transaction_time.record(elapsed)
             return jsonify({"error": f"Router error: {e.details()}"}), 502
 
+        slim = request.args.get("slim")
         result = {
             "total_detections": len(resp.all_detections),
-            "annotated_img": f"data:image/jpeg;base64,{base64.b64encode(resp.merged_frame).decode()}",
+            "annotated_img": "" if slim else f"data:image/jpeg;base64,{base64.b64encode(resp.merged_frame).decode()}",
             "unhandled": [
                 {"class": d.class_name, "confidence": round(d.confidence, 4),
                  "bbox": [round(d.bbox.x1, 1), round(d.bbox.y1, 1),
@@ -129,7 +136,8 @@ def predict():
                 "cumulative": {c.class_name: c.count for c in vr.cumulative},
             }
 
-        elapsed = (time.time() - t_start) * 1000
+        elapsed = round((time.time() - t_start) * 1000, 1)
+        result["processing_ms"] = elapsed
         span.set_attribute("response_time_ms", elapsed)
         span.set_attribute("transaction_time_ms", elapsed)
         _response_time.record(elapsed)

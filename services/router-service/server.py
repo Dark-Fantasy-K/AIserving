@@ -16,8 +16,11 @@ from concurrent import futures
 import cv2
 import grpc
 import numpy as np
+import torch
 from PIL import Image
 from ultralytics import YOLO
+
+DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
 from proto_gen import pipeline_pb2, pipeline_pb2_grpc
 from telemetry import setup, grpc_inject, grpc_extract
@@ -74,7 +77,8 @@ class RouterServicer(pipeline_pb2_grpc.RouterServiceServicer):
         logger.info("Loading YOLOv8s detector...")
         t0 = time.time()
         self.detector = YOLO("yolov8s.pt")
-        logger.info(f"YOLOv8s loaded in {time.time() - t0:.2f}s")
+        self.detector.to(DEVICE)
+        logger.info(f"YOLOv8s loaded in {time.time() - t0:.2f}s (device={DEVICE})")
 
         logger.info(f"Connecting to Pedestrian Service: {PED_ADDR}")
         self.ped_channel = grpc.insecure_channel(PED_ADDR, options=GRPC_OPTIONS)
@@ -95,10 +99,11 @@ class RouterServicer(pipeline_pb2_grpc.RouterServiceServicer):
             # ---- 1) YOLO detection ----
             with tracer.start_as_current_span("router.yolo_inference") as proc_span:
                 t_proc = time.time()
-                yolo_results = self.detector(frame, verbose=False)[0]
+                yolo_results = self.detector(frame, verbose=False, device=DEVICE)[0]
                 proc_ms = round((time.time() - t_proc) * 1000, 1)
                 proc_span.set_attribute("processing_time_ms", proc_ms)
                 _processing_time.record(proc_ms)
+                logger.info(f"YOLO inference: {proc_ms}ms")
 
             all_detections = []
             person_dets = []

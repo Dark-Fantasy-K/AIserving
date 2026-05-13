@@ -5,6 +5,7 @@ Send video frames to the gateway /predict endpoint to generate load.
 Usage:
   python3 test/send_traffic.py
   python3 test/send_traffic.py --video samples/traffic_car.mp4 --fps 2 --loops 3
+  python3 test/send_traffic.py --video datasets/persons.mp4 --fps 5 --loops 3  
 """
 import argparse
 import io
@@ -13,6 +14,7 @@ import sys
 import cv2
 import requests
 from pathlib import Path
+from PIL import Image
 
 GATEWAY = "http://localhost:5000"
 
@@ -32,36 +34,45 @@ def extract_frames(video_path: str, fps: float) -> list[bytes]:
         if not ret:
             break
         if idx % step == 0:
-            _, buf = cv2.imencode(".jpg", frame)
-            frames.append(buf.tobytes())
+            img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            img.thumbnail((640, 640), Image.BILINEAR)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            frames.append(buf.getvalue())
         idx += 1
     cap.release()
-    print(f"  Extracted {len(frames)} frames (source {native_fps:.0f}fps → {fps}fps)")
+    avg_kb = sum(len(f) for f in frames) / len(frames) / 1024 if frames else 0
+    print(f"  Extracted {len(frames)} frames (source {native_fps:.0f}fps → {fps}fps, avg {avg_kb:.1f}KB/frame)")
     return frames
 
 
-def send(frames: list[bytes], interval: float, loops: int, mode: str):
+def send(frames: list[bytes], interval: float, loops: int, mode: str, slim: bool = False):
     total = ok = err = 0
     latencies = []
+    session = requests.Session()
+    params = {"mode": mode}
+    if slim:
+        params["slim"] = "1"
+    headers = {"Content-Type": "image/jpeg"}
 
     for loop in range(loops):
         print(f"\n── Loop {loop+1}/{loops} ──")
         for i, frame in enumerate(frames):
-            files = {"image": ("frame.jpg", io.BytesIO(frame), "image/jpeg")}
-            data = {"mode": mode}
             t0 = time.time()
             try:
-                r = requests.post(f"{GATEWAY}/predict", files=files, data=data, timeout=30)
-                latency = (time.time() - t0) * 1000
-                latencies.append(latency)
+                r = session.post(f"{GATEWAY}/predict", data=frame,
+                                 params=params, headers=headers, timeout=30)
+                rtt = (time.time() - t0) * 1000
                 total += 1
                 if r.status_code == 200:
                     ok += 1
                     body = r.json()
+                    latency = body.get("processing_ms", rtt)
+                    latencies.append(latency)
                     total = body.get("total_detections", 0)
                     persons = body.get("PersonPoseHandler", {}).get("person_count", 0)
                     vehicles = body.get("VehicleCountHandler", {}).get("current_total", 0)
-                    print(f"  [{i+1:3d}] {latency:6.0f}ms  total={total} persons={persons} vehicles={vehicles}")
+                    print(f"  [{i+1:3d}] {latency:6.1f}ms (rtt {rtt:.0f}ms)  total={total} persons={persons} vehicles={vehicles}")
                 else:
                     err += 1
                     print(f"  [{i+1:3d}] HTTP {r.status_code}: {r.text[:80]}")
@@ -87,6 +98,7 @@ def main():
     p.add_argument("--loops",    type=int,   default=2,    help="number of full-video passes")
     p.add_argument("--interval", type=float, default=0.5,  help="seconds between requests")
     p.add_argument("--mode",     default="both", choices=["pedestrian", "vehicle", "both"])
+    p.add_argument("--slim",     action="store_true", help="skip annotated image in response")
     args = p.parse_args()
 
     video = Path(args.video)
@@ -105,7 +117,7 @@ def main():
         sys.exit(1)
 
     frames = extract_frames(str(video), args.fps)
-    send(frames, args.interval, args.loops, args.mode)
+    send(frames, args.interval, args.loops, args.mode, args.slim)
 
 
 if __name__ == "__main__":
