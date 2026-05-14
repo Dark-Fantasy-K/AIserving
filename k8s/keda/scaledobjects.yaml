@@ -1,0 +1,47 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: pedestrian-scaledobject
+spec:
+  scaleTargetRef:
+    name: pedestrian
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  pollingInterval: 15
+  cooldownPeriod: 120
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.default.svc.cluster.local:9090
+        metricName: pedestrian_p95_latency_ms
+        # scale out when p95 response time > 300ms
+        query: histogram_quantile(0.95, rate(pedestrian_response_time_ms_bucket[1m]))
+        threshold: "300"
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vehicle-scaledobject
+spec:
+  scaleTargetRef:
+    name: vehicle
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  pollingInterval: 15
+  cooldownPeriod: 120
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.default.svc.cluster.local:9090
+        metricName: vehicle_p95_latency_ms
+        # scale out when p95 response time > 300ms
+        query: histogram_quantile(0.95, rate(vehicle_response_time_ms_bucket[1m]))
+        threshold: "300"
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"

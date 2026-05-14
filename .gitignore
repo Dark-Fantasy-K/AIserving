@@ -9,6 +9,6 @@ __pycache__/
 
 # model
 *.pt
-
+./CLAUDE.md
 # dataset 
-./datatset/
+./datatset/minikube-linux-amd64

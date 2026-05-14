@@ -7,6 +7,7 @@ Receives person detections → YOLOv8s-pose estimation → returns keypoints + a
 import io
 import time
 import logging
+import threading
 from concurrent import futures
 
 import cv2
@@ -42,6 +43,30 @@ SKELETON = [
     (11, 13), (13, 15), (12, 14), (14, 16),
 ]
 
+IOU_MATCH_THRESHOLD = 0.3
+
+
+def _iou(b1, b2):
+    ix1, iy1 = max(b1[0], b2[0]), max(b1[1], b2[1])
+    ix2, iy2 = min(b1[2], b2[2]), min(b1[3], b2[3])
+    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+    area1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
+    area2 = (b2[2] - b2[0]) * (b2[3] - b2[1])
+    union = area1 + area2 - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _match_pedestrian_id(bbox, detections):
+    """Return pedestrian_id from best-matching detection by IoU, or -1 if below threshold."""
+    best_id, best_iou = -1, IOU_MATCH_THRESHOLD
+    for det in detections:
+        iou = _iou(bbox, [det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2])
+        if iou > best_iou:
+            best_iou = iou
+            best_id = det.pedestrian_id
+    return best_id
+
+
 COLOR_KP = (110, 231, 183)
 COLOR_SKEL = (80, 180, 140)
 COLOR_BBOX = (110, 231, 183)
@@ -67,6 +92,7 @@ class PedestrianServicer(pipeline_pb2_grpc.PedestrianServiceServicer):
         t0 = time.time()
         self.pose_model = YOLO("yolov8s-pose.pt")
         self.pose_model.to(DEVICE)
+        self._infer_lock = threading.Lock()
         logger.info(f"YOLOv8s-pose loaded in {time.time() - t0:.2f}s (device={DEVICE})")
 
     def ProcessFrame(self, request, context):
@@ -78,7 +104,8 @@ class PedestrianServicer(pipeline_pb2_grpc.PedestrianServiceServicer):
 
             with tracer.start_as_current_span("pedestrian.pose_inference") as proc_span:
                 t_proc = time.time()
-                results = self.pose_model(frame, verbose=False, device=DEVICE)[0]
+                with self._infer_lock:
+                    results = self.pose_model(frame, verbose=False, device=DEVICE)[0]
                 proc_ms = round((time.time() - t_proc) * 1000, 1)
                 proc_span.set_attribute("processing_time_ms", proc_ms)
                 _processing_time.record(proc_ms)
@@ -95,6 +122,11 @@ class PedestrianServicer(pipeline_pb2_grpc.PedestrianServiceServicer):
                     bbox = boxes.xyxy[i].tolist()
                     conf = float(boxes.conf[i])
 
+                    # Only process pedestrians assigned to this shard.
+                    ped_id = _match_pedestrian_id(bbox, request.detections)
+                    if ped_id == -1:
+                        continue
+
                     proto_kps = []
                     pts = []
                     for j, name in enumerate(KEYPOINT_NAMES):
@@ -110,11 +142,12 @@ class PedestrianServicer(pipeline_pb2_grpc.PedestrianServiceServicer):
                         ),
                         confidence=round(conf, 4),
                         keypoints=proto_kps,
+                        pedestrian_id=ped_id,
                     ))
 
                     x1, y1, x2, y2 = [int(v) for v in bbox]
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), COLOR_BBOX, 2)
-                    label = f'person {conf:.0%}'
+                    label = f'#{ped_id} {conf:.0%}'
                     (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                     cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 8, y1), COLOR_TEXT_BG, -1)
                     cv2.putText(annotated, label, (x1 + 4, y1 - 4),

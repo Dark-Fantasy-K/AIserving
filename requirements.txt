@@ -19,6 +19,8 @@ opentelemetry-sdk>=1.20
 opentelemetry-exporter-otlp-proto-grpc>=1.20
 
 # --- ML / CV ---
+# GPU: use setup.sh (installs torch cu121 for GTX 1050 Ti)
+# CPU fallback only: pip install torch torchvision
 ultralytics>=8.1
 torch>=2.1
 torchvision>=0.16

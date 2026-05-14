@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ============================================================
-#  build.sh — 构建 + 部署 YOLO 微服务
+#  build.sh — Build + deploy YOLO microservices
 #
-#  用法:
-#    ./build.sh proto          # 生成 gRPC 代码
-#    ./build.sh docker         # 构建所有 Docker 镜像
-#    ./build.sh compose        # docker-compose 本地启动
-#    ./build.sh k8s            # 部署到 K8s
-#    ./build.sh local          # 不用 Docker，直接本地跑 4 个进程
+#  Usage:
+#    ./build.sh proto          # Generate gRPC stubs
+#    ./build.sh docker         # Build all Docker images
+#    ./build.sh compose        # Start locally with docker-compose
+#    ./build.sh k8s            # Deploy to Kubernetes
+#    ./build.sh local          # Run 4 processes locally without Docker
 #    ./build.sh all            # proto → docker → compose
 # ============================================================
 
@@ -18,19 +18,20 @@ SERVICES_DIR="$ROOT/services"
 REGISTRY="${REGISTRY:-your-registry}"
 TAG="${TAG:-latest}"
 
-# ---- 1) 生成 proto ----
+# ---- 1) Generate proto stubs ----
 cmd_proto() {
     echo ">>> Generating gRPC stubs..."
     bash "$ROOT/setup.sh" proto
 }
 
-# ---- 2) 构建 Docker 镜像 ----
-# 每个镜像都以项目根为 build context，Dockerfile 内部自行生成 proto stubs
+# ---- 2) Build Docker images ----
+# Each image uses the project root as build context; Dockerfiles generate proto stubs internally
 cmd_docker() {
-    # 用法: ./build.sh docker [服务名...]
-    # 不传参数则构建全部；传名称则只构建指定服务
-    # 示例: ./build.sh docker router gateway
-    local targets=("${@:-pedestrian vehicle router gateway}")
+    # Usage: ./build.sh docker [service...]
+    # No arguments builds all; named arguments build only those services
+    # Example: ./build.sh docker router gateway
+    local targets=("$@")
+    if [[ $# -eq 0 ]]; then targets=(pedestrian vehicle router gateway); fi
 
     echo ">>> Building Docker images (context: $ROOT)..."
     cd "$ROOT"
@@ -64,7 +65,7 @@ cmd_docker() {
                 echo "  ✓ ${REGISTRY}/gateway:${TAG}"
                 ;;
             *)
-                warn "未知服务: $svc（可选: pedestrian vehicle router gateway）"
+                echo "Warning: unknown service: $svc (choices: pedestrian vehicle router gateway)" >&2
                 ;;
         esac
     done
@@ -73,7 +74,7 @@ cmd_docker() {
     echo "Done."
 }
 
-# ---- 3) docker-compose 启动 ----
+# ---- 3) Start with docker-compose ----
 cmd_compose() {
     echo ">>> Starting with docker-compose..."
     cd "$ROOT"
@@ -88,7 +89,7 @@ cmd_compose() {
     echo "Logs: docker compose logs -f"
 }
 
-# ---- 4) K8s 部署 ----
+# ---- 4) Kubernetes deployment ----
 cmd_k8s() {
     echo ">>> Deploying to Kubernetes..."
 
@@ -114,13 +115,13 @@ cmd_k8s() {
     echo "Access: http://<node-ip>:30500"
 }
 
-# ---- 5) 本地开发（不用 Docker）----
+# ---- 5) Local development (without Docker) ----
 cmd_local() {
     echo ">>> Starting all services locally..."
 
-    # 先确保 proto stubs 已生成
+    # Ensure proto stubs are generated first
     if [ ! -f "$ROOT/proto_gen/pipeline_pb2.py" ]; then
-        echo "  proto stubs 未找到，先生成..."
+        echo "  Proto stubs not found, generating..."
         cmd_proto
     fi
 
@@ -157,7 +158,7 @@ cmd_local() {
     wait
 }
 
-# ---- 入口 ----
+# ---- Entrypoint ----
 case "${1:-}" in
     proto)   cmd_proto ;;
     docker)  shift; cmd_docker "$@" ;;
@@ -166,14 +167,14 @@ case "${1:-}" in
     local)   cmd_local ;;
     all)     cmd_proto && cmd_docker && cmd_compose ;;
     *)
-        echo "用法: $0 {proto|docker|compose|k8s|local|all}"
+        echo "Usage: $0 {proto|docker|compose|k8s|local|all}"
         echo ""
-        echo "  proto              - 生成 gRPC Python 代码"
-        echo "  docker [服务...]   - 构建指定镜像（不传则全部）"
-        echo "  compose - docker-compose 本地启动"
-        echo "  k8s     - 部署到 Kubernetes 集群"
-        echo "  local   - 不用 Docker，直接本地跑 4 个进程"
-        echo "  all     - proto → docker → compose"
+        echo "  proto              - Generate gRPC Python stubs"
+        echo "  docker [service..] - Build specified images (all if none given)"
+        echo "  compose            - Start locally with docker-compose"
+        echo "  k8s                - Deploy to Kubernetes cluster"
+        echo "  local              - Run 4 processes locally without Docker"
+        echo "  all                - proto → docker → compose"
         exit 1
         ;;
 esac

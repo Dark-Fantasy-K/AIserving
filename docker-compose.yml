@@ -57,6 +57,11 @@ services:
       - otel-collector
     deploy:
       resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
         limits:
           memory: 2G
 
@@ -89,6 +94,11 @@ services:
       - otel-collector
     deploy:
       resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
         limits:
           memory: 2G
 

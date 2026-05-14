@@ -16,7 +16,8 @@ spec:
     spec:
       containers:
         - name: vehicle
-          image: kaikanghuang/vehicle-service:latest
+          image: kkdocking/vehicle-service:gpu
+          imagePullPolicy: Never
           ports:
             - containerPort: 50053
           resources:

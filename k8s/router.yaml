@@ -6,6 +6,8 @@ metadata:
     app: router
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: router
@@ -14,9 +16,11 @@ spec:
       labels:
         app: router
     spec:
+      runtimeClassName: nvidia
       containers:
         - name: router
-          image: kaikanghuang/router-service:latest
+          image: kkdocking/router-service:gpu
+          imagePullPolicy: Never
           ports:
             - containerPort: 50051
           env:
@@ -27,9 +31,13 @@ spec:
           resources:
             limits:
               memory: "2Gi"
+              nvidia.com/gpu: 1
+              nvidia.com/gpumem: 2048
             requests:
-              memory: "512Mi"
+              memory: "1Gi"
               cpu: "250m"
+              nvidia.com/gpu: 1
+              nvidia.com/gpumem: 2048
           readinessProbe:
             tcpSocket:
               port: 50051

@@ -14,9 +14,10 @@ message BoundingBox {
 }
 
 message Detection {
-  string class_name = 1;
-  float  confidence = 2;
-  BoundingBox bbox  = 3;
+  string class_name    = 1;
+  float  confidence    = 2;
+  BoundingBox bbox     = 3;
+  int32  pedestrian_id = 4;  // assigned by router for person class; -1 for non-persons
 }
 
 // (RGB bytes)
@@ -39,9 +40,10 @@ message Keypoint {
 }
 
 message PersonPose {
-  BoundingBox        bbox       = 1;
-  float              confidence = 2;
-  repeated Keypoint  keypoints  = 3;
+  BoundingBox        bbox         = 1;
+  float              confidence   = 2;
+  repeated Keypoint  keypoints    = 3;
+  int32              pedestrian_id = 4;  // echoed from Detection.pedestrian_id
 }
 
 message PedestrianRequest {

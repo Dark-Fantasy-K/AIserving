@@ -16,7 +16,8 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: kaikanghuang/gateway:latest
+          image: kkdocking/gateway:gpu
+          imagePullPolicy: Never
           ports:
             - containerPort: 5000
           env:

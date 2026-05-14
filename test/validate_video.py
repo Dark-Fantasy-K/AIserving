@@ -60,9 +60,7 @@ def run(video_path: str, gateway_url: str, max_frames: int, out_path: str | None
     log.info(f"Target: {predict_url}")
 
     writer = None
-    if out_path:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+    writer_path = out_path  # initialized lazily on first annotated frame
 
     stats = {
         "frames": 0, "errors": 0,
@@ -85,7 +83,7 @@ def run(video_path: str, gateway_url: str, max_frames: int, out_path: str | None
             resp = session.post(
                 predict_url,
                 files={"image": ("frame.jpg", jpeg_bytes, "image/jpeg")},
-                timeout=1, # seconds
+                timeout=30,
             )
             resp.raise_for_status()
         except requests.RequestException as e:
@@ -93,7 +91,6 @@ def run(video_path: str, gateway_url: str, max_frames: int, out_path: str | None
             stats["errors"] += 1
             frame_idx += 1
             continue
-        ## full end-to-end latency 
         rtt_ms = (time.time() - t0) * 1000
 
         data = resp.json()
@@ -104,6 +101,7 @@ def run(video_path: str, gateway_url: str, max_frames: int, out_path: str | None
         persons  = ped.get("person_count", 0)
         vehicles = veh.get("current_total", 0)
         other    = len(data.get("unhandled", []))
+        ped_ids  = [str(p.get("pedestrian_id", "?")) for p in ped.get("persons", [])]
 
         stats["frames"]    += 1
         stats["persons"]   += persons
@@ -111,19 +109,28 @@ def run(video_path: str, gateway_url: str, max_frames: int, out_path: str | None
         stats["other"]     += other
         stats["latency_ms"].append(latency)
 
-        if writer and data.get("annotated_img"):
+        if writer_path and data.get("annotated_img"):
             annotated = decode_b64_jpeg(data["annotated_img"])
+            # Lazy-init writer using actual annotated frame dimensions
+            if writer is None:
+                ah, aw = annotated.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                writer = cv2.VideoWriter(writer_path, fourcc, fps, (aw, ah))
+                log.info(f"VideoWriter initialized: {aw}x{ah} @ {fps}fps → {writer_path}")
+            id_str = "IDs:[" + ",".join(ped_ids) + "]" if ped_ids else ""
+            overlay = (f"F{frame_idx:04d} | persons:{persons} vehicles:{vehicles} "
+                       f"{id_str} | {latency:.0f}ms")
             cv2.putText(
-                annotated,
-                f"F{frame_idx:04d} | persons:{persons} vehicles:{vehicles} | {latency:.0f}ms",
+                annotated, overlay,
                 (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
             )
             writer.write(annotated)
 
-        if frame_idx % 25 == 0:
+        if frame_idx % 25 == 0 or persons > 0 or vehicles > 0:
+            id_str = f"  ids={ped_ids}" if ped_ids else ""
             log.info(
                 f"Frame {frame_idx:>4d}/{total}: persons={persons} vehicles={vehicles} "
-                f"other={other}  latency={latency:.0f}ms"
+                f"other={other}  latency={latency:.0f}ms{id_str}"
             )
 
         frame_idx += 1

@@ -103,6 +103,7 @@ def predict():
                 "person_count": pr.person_count,
                 "persons": [
                     {
+                        "pedestrian_id": p.pedestrian_id,
                         "confidence": round(p.confidence, 4),
                         "bbox": [round(p.bbox.x1, 1), round(p.bbox.y1, 1),
                                  round(p.bbox.x2, 1), round(p.bbox.y2, 1)],

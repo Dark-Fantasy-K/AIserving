@@ -6,6 +6,8 @@ metadata:
     app: pedestrian
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: pedestrian
@@ -14,16 +16,20 @@ spec:
       labels:
         app: pedestrian
     spec:
+      runtimeClassName: nvidia
       containers:
         - name: pedestrian
-          image: kaikanghuang/pedestrian-service:latest
+          image: kkdocking/pedestrian-service:gpu
+          imagePullPolicy: Never
           ports:
             - containerPort: 50052
           resources:
             limits:
               memory: "2Gi"
+              nvidia.com/gpu: 1
+              nvidia.com/gpumem: 1024
             requests:
-              memory: "512Mi"
+              memory: "1Gi"
               cpu: "250m"
           readinessProbe:
             tcpSocket:
